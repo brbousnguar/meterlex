@@ -1,8 +1,9 @@
-"""Three-source ingestion: Claude Code, Codex, Antigravity.
+"""Four-source ingestion: Claude Code, Codex, Antigravity, Copilot CLI.
 
 Claude Code  → ~/.claude/projects/**/*.jsonl  (assistant events)
 Codex        → ~/.codex/sessions/**/*.jsonl   (token_count events)
 Antigravity  → ~/.gemini/antigravity-cli/conversations/*.db  (per-conversation DBs)
+Copilot CLI  → ~/.copilot/data.db             (sessions table, per-session token totals)
 """
 import asyncio
 import json
@@ -26,6 +27,7 @@ log = logging.getLogger("agentic-spend.ingest")
 CLAUDE_CODE_DIR = Path(os.getenv("CLAUDE_CODE_DIR", os.path.expanduser("~/.claude/projects")))
 CODEX_DIR = Path(os.getenv("CODEX_DIR", os.path.expanduser("~/.codex/sessions")))
 AGY_DIR = Path(os.getenv("AGY_DIR", os.path.expanduser("~/.gemini/antigravity-cli")))
+COPILOT_DIR = Path(os.getenv("COPILOT_DIR", os.path.expanduser("~/.copilot")))
 SCAN_INTERVAL_SEC = int(os.getenv("SCAN_INTERVAL_SEC", "60"))
 
 FREE_PROVIDERS = {"ollama-launch", "ollama-launch-codex-app", "ollama"}
@@ -193,11 +195,15 @@ def _ingest_codex(session: Session, full: bool = False) -> dict:
         state = session.get(ScanState, rel)
         if full or state is None or size < state.file_size:
             offset = 0
+            last_model = None
         else:
             offset = state.last_offset
+            last_model = state.last_model
 
         try:
-            new_turns, new_offset, file_errors = _scan_codex_file(session, fp, rel, offset, fx, now)
+            new_turns, new_offset, new_model, file_errors = _scan_codex_file(
+                session, fp, rel, offset, last_model, fx, now
+            )
         except Exception as exc:
             log.warning("error reading %s: %s", rel, exc)
             errors += 1
@@ -205,7 +211,10 @@ def _ingest_codex(session: Session, full: bool = False) -> dict:
 
         turns_added += new_turns
         errors += file_errors
-        session.merge(ScanState(file_path=rel, last_offset=new_offset, last_scanned_at=now, file_size=size))
+        session.merge(ScanState(
+            file_path=rel, last_offset=new_offset, last_scanned_at=now,
+            file_size=size, last_model=new_model,
+        ))
         session.commit()
 
     return {"files": len(files), "turns_added": turns_added, "errors": errors}
@@ -231,12 +240,16 @@ def _get_session_meta(fp: Path) -> tuple[str, str, str]:
     return str(fp.stem), "openai", ""
 
 
-def _scan_codex_file(session, fp, rel, offset, fx, now):
+def _scan_codex_file(session, fp, rel, offset, last_model, fx, now):
     new_turns = errors = 0
 
     session_id, session_provider, project = _get_session_meta(fp)
     is_free = session_provider in FREE_PROVIDERS
-    model_id = f"local/{session_provider}" if is_free else "gpt-5"
+    fallback_model_id = f"local/{session_provider}" if is_free else "gpt-5"
+    # Resume with the model in effect at the last scan, so incremental scans
+    # (which start mid-file and never see earlier turn_context events) don't
+    # fall back to the generic "gpt-5" id until the next model switch.
+    current_model = last_model or fallback_model_id
 
     with open(fp, "rb") as fh:
         fh.seek(offset)
@@ -254,6 +267,12 @@ def _scan_codex_file(session, fp, rel, offset, fx, now):
                 event = json.loads(line)
             except json.JSONDecodeError:
                 errors += 1
+                continue
+
+            if event.get("type") == "turn_context":
+                m = (event.get("payload") or {}).get("model")
+                if m:
+                    current_model = m
                 continue
 
             if event.get("type") != "event_msg":
@@ -287,6 +306,8 @@ def _scan_codex_file(session, fp, rel, offset, fx, now):
             rsn = _to_int(last.get("reasoning_output_tokens"))
             tot = in_t + out_t
 
+            model_id = fallback_model_id if is_free else current_model
+
             if is_free:
                 cost_usd, price_src = 0.0, "free"
             else:
@@ -316,7 +337,7 @@ def _scan_codex_file(session, fp, rel, offset, fx, now):
             ))
             new_turns += 1
 
-    return new_turns, offset, errors
+    return new_turns, offset, current_model, errors
 
 
 # ── Antigravity ───────────────────────────────────────────────────────────────
@@ -544,29 +565,161 @@ def _ingest_antigravity(session: Session, full: bool = False) -> dict:
     return {"files": len(dbs), "turns_added": turns_added, "errors": errors}
 
 
+# ── Copilot CLI ───────────────────────────────────────────────────────────────
+
+# GitHub's agentic Copilot CLI writes per-session token totals to a single
+# SQLite DB at ~/.copilot/data.db. The sessions table is cumulative and grows
+# as a session progresses, so (like Antigravity) we store one UsageTurn per
+# session and update its totals when they change. Only the live data.db is
+# read; pre-update backups are ignored to avoid double counting.
+_COPILOT_MODEL_ID = "copilot-auto"  # representative rate (see pricing.py)
+
+
+def _ingest_copilot(session: Session, full: bool = False) -> dict:
+    db_path = COPILOT_DIR / "data.db"
+    if not db_path.exists():
+        log.warning("Copilot CLI data.db %s not found", db_path)
+        return {"files": 0, "turns_added": 0, "errors": 0}
+
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    except sqlite3.Error as exc:
+        log.warning("cannot open Copilot CLI DB %s: %s", db_path, exc)
+        return {"files": 0, "turns_added": 0, "errors": 1}
+
+    turns_added = errors = 0
+    fx = pricing.get_fx_rate(session)
+
+    try:
+        cur = conn.cursor()
+        rows = cur.execute(
+            "SELECT id, model, created_at, updated_at, "
+            "total_input_tokens, total_output_tokens, "
+            "total_cached_tokens, total_reasoning_tokens "
+            "FROM sessions"
+        ).fetchall()
+    except sqlite3.Error as exc:
+        log.warning("Copilot CLI sessions query failed: %s", exc)
+        conn.close()
+        return {"files": 1, "turns_added": 0, "errors": 1}
+
+    for sid, model, created_at, updated_at, in_t, out_t, cached_t, rsn_t in rows:
+        try:
+            in_t = _to_int(in_t)
+            out_t = _to_int(out_t)
+            cached_t = _to_int(cached_t)
+            rsn_t = _to_int(rsn_t)
+            if in_t + out_t + cached_t + rsn_t == 0:
+                continue
+
+            # The CLI's total_input_tokens includes the cached subset. To avoid
+            # pricing cached tokens at the full prompt rate, bill only the
+            # non-cached portion at the prompt rate and the cached portion at
+            # the (cheaper) cache_read rate.
+            prompt_t = max(0, in_t - cached_t)
+
+            cost_usd, price_src = pricing.compute_cost(session, "github", _COPILOT_MODEL_ID, {
+                "input": prompt_t, "output": out_t,
+                "cacheRead": cached_t, "cacheWrite": 0, "reasoningTokens": rsn_t,
+            })
+
+            ts = _parse_ts(created_at) or _parse_ts(updated_at) or datetime.utcnow()
+            project = ""
+
+            existing = session.exec(
+                select(UsageTurn).where(
+                    UsageTurn.source == "copilot",
+                    UsageTurn.session_id == sid,
+                    UsageTurn.turn_key == "session",
+                )
+            ).first()
+
+            if existing:
+                if (existing.input_tokens == prompt_t
+                        and existing.output_tokens == out_t
+                        and existing.cache_read == cached_t
+                        and existing.reasoning_tokens == rsn_t):
+                    continue
+                existing.input_tokens = prompt_t
+                existing.output_tokens = out_t
+                existing.cache_read = cached_t
+                existing.cache_write = 0
+                existing.reasoning_tokens = rsn_t
+                existing.total_tokens = in_t + out_t
+                existing.ts = ts
+                existing.project = project
+                existing.cost_usd = cost_usd
+                existing.cost_eur = round(cost_usd * fx, 8)
+                existing.fx_rate = fx
+                existing.price_source = price_src
+                session.add(existing)
+            else:
+                session.add(UsageTurn(
+                    source="copilot",
+                    session_id=sid,
+                    turn_key="session",
+                    project=project,
+                    model_id=_COPILOT_MODEL_ID,
+                    ts=ts,
+                    input_tokens=prompt_t,
+                    output_tokens=out_t,
+                    cache_read=cached_t,
+                    cache_write=0,
+                    reasoning_tokens=rsn_t,
+                    total_tokens=in_t + out_t,
+                    cost_usd=cost_usd,
+                    cost_eur=round(cost_usd * fx, 8),
+                    fx_rate=fx,
+                    price_source=price_src,
+                    file_path=str(db_path),
+                ))
+                turns_added += 1
+        except Exception as exc:
+            log.warning("error reading copilot session %s: %s", sid, exc)
+            errors += 1
+
+    conn.close()
+
+    try:
+        session.commit()
+    except Exception as exc:
+        log.error("copilot commit failed: %s", exc)
+        errors += 1
+
+    return {"files": 1, "turns_added": turns_added, "errors": errors}
+
+
 # ── scan loop ─────────────────────────────────────────────────────────────────
 
 def scan_once(session: Session, full: bool = False) -> dict:
     cc = _ingest_claude_code(session, full)
     cx = _ingest_codex(session, full)
     agy = _ingest_antigravity(session, full)
-    total = cc["turns_added"] + cx["turns_added"] + agy["turns_added"]
-    log.info("scan full=%s cc=%s cx=%s agy=%s total=%d", full, cc, cx, agy, total)
-    return {"claude_code": cc, "codex": cx, "antigravity": agy, "total_turns_added": total}
+    cp = _ingest_copilot(session, full)
+    total = cc["turns_added"] + cx["turns_added"] + agy["turns_added"] + cp["turns_added"]
+    log.info("scan full=%s cc=%s cx=%s agy=%s cp=%s total=%d", full, cc, cx, agy, cp, total)
+    return {"claude_code": cc, "codex": cx, "antigravity": agy, "copilot": cp, "total_turns_added": total}
+
+
+def _do_scan(full: bool) -> dict:
+    # Run inside a worker thread (via asyncio.to_thread) so the blocking,
+    # I/O-heavy scan cannot stall uvicorn's event loop. The Session is created
+    # and consumed within the same thread because SQLAlchemy sessions are not
+    # safe to share across threads.
+    with Session(engine) as session:
+        return scan_once(session, full=full)
 
 
 async def ingest_loop():
     create_db()
     with Session(engine) as session:
         pricing.seed_prices(session)
-    with Session(engine) as session:
-        scan_once(session, full=True)
+    await asyncio.to_thread(_do_scan, True)
 
     while True:
         await asyncio.sleep(SCAN_INTERVAL_SEC)
         try:
-            with Session(engine) as session:
-                scan_once(session, full=False)
+            await asyncio.to_thread(_do_scan, False)
         except Exception as exc:
             log.error("incremental scan failed: %s", exc)
 
@@ -577,27 +730,29 @@ def trigger_scan(full: bool = False) -> dict:
 
 
 def recompute_costs() -> int:
+    # Price every turn by its model_id via compute_cost, which already handles
+    # the free fallback (local/*, <synthetic>) and the gemini/glm tier
+    # fallbacks. Pricing must NOT be gated on source — ollama (GLM) and copilot
+    # turns have real model IDs with real rate cards.
+    PROVIDER_BY_SOURCE = {
+        "claude-code": "anthropic",
+        "codex": "openai",
+        "antigravity": "google",
+        "ollama": "zhipu",
+        "copilot": "github",
+    }
     with Session(engine) as session:
         fx = pricing.get_fx_rate(session)
         rows = session.exec(select(UsageTurn)).all()
         n = 0
         for t in rows:
-            if t.source in ("claude-code", "codex"):
-                provider = "anthropic" if t.source == "claude-code" else "openai"
-                usage = {
-                    "input": t.input_tokens, "output": t.output_tokens,
-                    "cacheRead": t.cache_read, "cacheWrite": t.cache_write,
-                    "reasoningTokens": t.reasoning_tokens,
-                }
-                t.cost_usd, t.price_source = pricing.compute_cost(session, provider, t.model_id, usage)
-            elif t.source == "antigravity":
-                usage = {
-                    "input": t.input_tokens, "output": t.output_tokens,
-                    "cacheRead": 0, "cacheWrite": 0,
-                }
-                t.cost_usd, t.price_source = pricing.compute_cost(session, "google", t.model_id, usage)
-            else:
-                t.cost_usd, t.price_source = 0.0, "free"
+            provider = PROVIDER_BY_SOURCE.get(t.source, "")
+            usage = {
+                "input": t.input_tokens, "output": t.output_tokens,
+                "cacheRead": t.cache_read, "cacheWrite": t.cache_write,
+                "reasoningTokens": t.reasoning_tokens,
+            }
+            t.cost_usd, t.price_source = pricing.compute_cost(session, provider, t.model_id, usage)
             t.cost_eur = round(t.cost_usd * fx, 8)
             t.fx_rate = fx
             session.add(t)

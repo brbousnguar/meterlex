@@ -20,8 +20,8 @@ It is deliberately local. Data stays in a SQLite file on your machine, the stack
 - **Claude Code** — every `assistant` event from `~/.claude/projects/**/*.jsonl`, with full input / output / cache token breakdown
 - **Codex** — per-turn token deltas from `~/.codex/sessions/**/*.jsonl` via `token_count` events; OpenAI Codex endpoint billed against ChatGPT Pro quota
 - **Antigravity** — per-conversation SQLite DBs at `~/.gemini/antigravity-cli/conversations/*.db`; token counts extracted from protobuf step payloads, model IDs from `gen_metadata` blobs
-- **Ollama** — GLM cloud model calls made through Claude Code, re-attributed by model prefix
-- **Copilot** — subscription only; monthly billing amounts seeded manually in Prices & settings
+- **Ollama** — GLM cloud model calls made through Claude Code, re-attributed by model prefix. Cloud GLM models are priced at official Z.AI rates; only truly local Ollama models (`local/*`) are €0.
+- **Copilot CLI** — the agentic `copilot` binary writes per-session token totals (input / output / cached / reasoning) to `~/.copilot/data.db`. The CLI reports `model = 'auto'`, so tokens are priced at a representative `copilot-auto` rate (editable in Prices & settings). In-editor Copilot usage is not exposed locally and is not counted. The CLI retains only recent sessions, so older usage is not recoverable. The flat subscription is tracked via monthly bills seeded in Prices & settings.
 
 Costs are computed as `(input × prompt_rate + output × completion_rate + cache_read × cache_read_rate + cache_write × cache_write_rate) × fx_rate`. Savings are `API cost − subscription` — positive means the subscription wins.
 
@@ -36,7 +36,14 @@ docker compose up -d
 | Dashboard | `http://localhost:5180` |
 | REST API | `http://localhost:8692/api/health` |
 
-The backend bind-mounts your home directory paths read-only. Set `CLAUDE_CODE_DIR`, `CODEX_DIR`, or `AGY_DIR` in the environment if your tool directories are elsewhere.
+The backend bind-mounts your coding-tool session directories **read-only**. Host paths are not hardcoded in `docker-compose.yml` — they come from a property file. Copy the template and adjust for your machine:
+
+```sh
+cp .env.example .env   # then edit the three paths in .env
+docker compose up -d
+```
+
+`docker compose` auto-loads `.env` from the project root. The three variables are `CLAUDE_CODE_PROJECTS`, `CODEX_SESSIONS`, and `AGY_DIR`. If a directory doesn't exist on your machine, leave it set — the mount will be empty and that source simply shows no data. On Windows use forward slashes (`C:/Users/...`); Docker Desktop accepts them.
 
 ## How it is put together
 
@@ -77,7 +84,7 @@ Nginx serves the React frontend and proxies `/api/` and `/api/spend/timeseries` 
 
 ## Pricing policy
 
-Seed prices come from public Anthropic, OpenAI, and Google rate cards and are stored in `pricing.py`. Manual overrides via the UI win over seed values. Gemini models without an exact match fall back to the generic flash-tier entry. GLM models, Ollama sessions, and `<synthetic>` events are priced at €0. FX defaults to 0.92 (USD → EUR), editable in settings. After changing a price or the FX rate, hit **Recompute all costs** to reapply to history.
+Seed prices come from public Anthropic, OpenAI, Google, and Z.AI rate cards and are stored in `pricing.py`. Manual overrides via the UI win over seed values. Gemini models without an exact match fall back to the generic flash-tier entry; unrecognised `glm-*` IDs fall back to the GLM-5.2 tier. Cloud GLM models are billed at official Z.AI rates — only truly local Ollama models (`local/*`) and `<synthetic>` events are priced at €0. FX defaults to 0.92 (USD → EUR), editable in settings. After changing a price or the FX rate, hit **Recompute all costs** to reapply to history.
 
 ## Visual identity
 

@@ -9,25 +9,43 @@ from sqlmodel import Session
 
 from models import ModelPrice, Setting
 
-# USD per single token
+# USD per single token. Per-1M rates divided by 1,000,000.
+# Sources:
+#   Anthropic — first-party API rate card (2026-06-24).
+#     cache_read ≈ 10% of input; cache_write = 1.25× input (5m TTL).
+#   OpenAI     — official pricing page. Reasoning tokens bill at the output rate.
+#   Z.AI       — official GLM rate card. No separate cache-write/reasoning tier.
 SEED_PRICES = {
-    "claude-sonnet-4-6": {
-        "display_name": "Claude Sonnet 4.6",
+    # --- Anthropic Claude ---
+    "claude-fable-5": {
+        "display_name": "Claude Fable 5",
         "provider": "anthropic",
-        "prompt": 3e-6, "completion": 15e-6,
-        "cache_read": 0.3e-6, "cache_write": 3.75e-6, "reasoning": 0.0,
+        "prompt": 10e-6, "completion": 50e-6,
+        "cache_read": 1.0e-6, "cache_write": 12.5e-6, "reasoning": 0.0,
+    },
+    "claude-opus-5": {
+        "display_name": "Claude Opus 5",
+        "provider": "anthropic",
+        "prompt": 5e-6, "completion": 25e-6,
+        "cache_read": 0.5e-6, "cache_write": 6.25e-6, "reasoning": 0.0,
     },
     "claude-opus-4-8": {
         "display_name": "Claude Opus 4.8",
         "provider": "anthropic",
-        "prompt": 15e-6, "completion": 75e-6,
-        "cache_read": 1.5e-6, "cache_write": 18.75e-6, "reasoning": 0.0,
+        "prompt": 5e-6, "completion": 25e-6,
+        "cache_read": 0.5e-6, "cache_write": 6.25e-6, "reasoning": 0.0,
     },
-    "claude-haiku-4-5-20251001": {
-        "display_name": "Claude Haiku 4.5",
+    "claude-opus-4-7": {
+        "display_name": "Claude Opus 4.7",
         "provider": "anthropic",
-        "prompt": 0.8e-6, "completion": 4e-6,
-        "cache_read": 0.08e-6, "cache_write": 1e-6, "reasoning": 0.0,
+        "prompt": 5e-6, "completion": 25e-6,
+        "cache_read": 0.5e-6, "cache_write": 6.25e-6, "reasoning": 0.0,
+    },
+    "claude-opus-4-6": {
+        "display_name": "Claude Opus 4.6",
+        "provider": "anthropic",
+        "prompt": 5e-6, "completion": 25e-6,
+        "cache_read": 0.5e-6, "cache_write": 6.25e-6, "reasoning": 0.0,
     },
     "claude-sonnet-5": {
         "display_name": "Claude Sonnet 5",
@@ -35,19 +53,99 @@ SEED_PRICES = {
         "prompt": 3e-6, "completion": 15e-6,
         "cache_read": 0.3e-6, "cache_write": 3.75e-6, "reasoning": 0.0,
     },
-    "claude-fable-5": {
-        "display_name": "Claude Fable 5",
+    "claude-sonnet-4-6": {
+        "display_name": "Claude Sonnet 4.6",
         "provider": "anthropic",
         "prompt": 3e-6, "completion": 15e-6,
         "cache_read": 0.3e-6, "cache_write": 3.75e-6, "reasoning": 0.0,
     },
+    "claude-haiku-4-5-20251001": {
+        "display_name": "Claude Haiku 4.5",
+        "provider": "anthropic",
+        "prompt": 1e-6, "completion": 5e-6,
+        "cache_read": 0.1e-6, "cache_write": 1.25e-6, "reasoning": 0.0,
+    },
+    # --- OpenAI (Codex CLI, per turn_context.model) ---
     "gpt-5": {
         "display_name": "GPT-5 (Codex)",
         "provider": "openai",
-        "prompt": 5e-6, "completion": 30e-6,
-        "cache_read": 0.5e-6, "cache_write": 0.0, "reasoning": 30e-6,
+        "prompt": 1.25e-6, "completion": 10e-6,
+        "cache_read": 0.125e-6, "cache_write": 1.25e-6, "reasoning": 10e-6,
     },
-    # Gemini flash-tier fallback (covers antigravity internal model names)
+    "gpt-5.4": {
+        "display_name": "GPT-5.4 (Codex)",
+        "provider": "openai",
+        "prompt": 1.25e-6, "completion": 10e-6,
+        "cache_read": 0.125e-6, "cache_write": 1.25e-6, "reasoning": 10e-6,
+    },
+    "gpt-5.4-mini": {
+        "display_name": "GPT-5.4 Mini (Codex)",
+        "provider": "openai",
+        "prompt": 0.25e-6, "completion": 2e-6,
+        "cache_read": 0.025e-6, "cache_write": 0.25e-6, "reasoning": 2e-6,
+    },
+    "gpt-5.5": {
+        "display_name": "GPT-5.5 (Codex)",
+        "provider": "openai",
+        "prompt": 1.25e-6, "completion": 10e-6,
+        "cache_read": 0.125e-6, "cache_write": 1.25e-6, "reasoning": 10e-6,
+    },
+    "gpt-5.6-sol": {
+        "display_name": "GPT-5.6 Sol (Codex)",
+        "provider": "openai",
+        "prompt": 1.25e-6, "completion": 10e-6,
+        "cache_read": 0.125e-6, "cache_write": 1.25e-6, "reasoning": 10e-6,
+    },
+    # Representative rate for GitHub Copilot CLI sessions. The agentic CLI
+    # records per-session token totals but only exposes `model = 'auto'`
+    # (GitHub routes to an undisclosed backend model), so there is no concrete
+    # rate card to map to. We price at GPT-5-class rates as a stand-in for the
+    # consumption-equivalent cost of a flat Copilot subscription. Override in
+    # Prices & settings if you prefer a different representative rate.
+    "copilot-auto": {
+        "display_name": "GitHub Copilot CLI (auto)",
+        "provider": "github",
+        "prompt": 1.25e-6, "completion": 10e-6,
+        "cache_read": 0.125e-6, "cache_write": 0.0, "reasoning": 10e-6,
+    },
+    # --- Z.AI GLM (cloud models routed through Claude Code / Ollama) ---
+    "glm-5.2": {
+        "display_name": "GLM-5.2 (Z.AI)",
+        "provider": "zhipu",
+        "prompt": 1.4e-6, "completion": 4.4e-6,
+        "cache_read": 0.26e-6, "cache_write": 0.0, "reasoning": 0.0,
+    },
+    "glm-5.1": {
+        "display_name": "GLM-5.1 (Z.AI)",
+        "provider": "zhipu",
+        "prompt": 1.4e-6, "completion": 4.4e-6,
+        "cache_read": 0.26e-6, "cache_write": 0.0, "reasoning": 0.0,
+    },
+    "glm-5": {
+        "display_name": "GLM-5 (Z.AI)",
+        "provider": "zhipu",
+        "prompt": 1.0e-6, "completion": 3.2e-6,
+        "cache_read": 0.2e-6, "cache_write": 0.0, "reasoning": 0.0,
+    },
+    "glm-5-turbo": {
+        "display_name": "GLM-5 Turbo (Z.AI)",
+        "provider": "zhipu",
+        "prompt": 1.2e-6, "completion": 4.0e-6,
+        "cache_read": 0.24e-6, "cache_write": 0.0, "reasoning": 0.0,
+    },
+    "glm-4.7": {
+        "display_name": "GLM-4.7 (Z.AI)",
+        "provider": "zhipu",
+        "prompt": 0.6e-6, "completion": 2.2e-6,
+        "cache_read": 0.11e-6, "cache_write": 0.0, "reasoning": 0.0,
+    },
+    "glm-4.6": {
+        "display_name": "GLM-4.6 (Z.AI)",
+        "provider": "zhipu",
+        "prompt": 0.6e-6, "completion": 2.2e-6,
+        "cache_read": 0.11e-6, "cache_write": 0.0, "reasoning": 0.0,
+    },
+    # --- Google Gemini (flash-tier fallback for antigravity model names) ---
     "gemini": {
         "display_name": "Gemini (flash tier)",
         "provider": "google",
@@ -80,7 +178,9 @@ SEED_PRICES = {
     },
 }
 
-FREE_MODEL_PREFIXES = ("glm-", "<synthetic>", "local/")
+# Only truly-local Ollama models (local/*) and synthetic events are €0.
+# GLM cloud models are billed at Z.AI rates above.
+FREE_MODEL_PREFIXES = ("<synthetic>", "local/")
 
 
 def _is_free(model_id: str) -> bool:
@@ -117,6 +217,12 @@ def resolve_price(session: Session, model_id: str) -> Optional[ModelPrice]:
     # Generic Gemini fallback for unrecognised gemini-* model IDs
     if model_id.lower().startswith("gemini"):
         return session.get(ModelPrice, "gemini")
+    # Generic GLM fallback for unrecognised glm-* IDs (e.g. dated variants)
+    if model_id.lower().startswith("glm-"):
+        return session.get(ModelPrice, "glm-5.2")
+    # Generic Codex fallback for unrecognised gpt-5* IDs (new dated variants)
+    if model_id.lower().startswith("gpt-5"):
+        return session.get(ModelPrice, "gpt-5")
     return None
 
 

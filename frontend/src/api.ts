@@ -85,6 +85,8 @@ export interface TsBucket {
   turns: number;
   by_source: Record<string, number>;
   tokens_by_source: Record<string, number>;
+  by_model: Record<string, number>;
+  tokens_by_model: Record<string, number>;
 }
 
 export interface PriceRow {

@@ -73,17 +73,29 @@ export default function Dashboard({ onSelectTool, onReload }: { onSelectTool: (s
   const sortBy = <T,>(arr: T[], key: keyof T, dir: SortDir) =>
     [...arr].sort((a, b) => dir === "desc" ? (b[key] as number) - (a[key] as number) : (a[key] as number) - (b[key] as number));
 
+  const [breakdown, setBreakdown] = useState<"tool" | "model">("tool");
+  const [highlightKey, setHighlightKey] = useState<string | null>(null);
+  const toggleHighlight = (k: string) => setHighlightKey((cur) => (cur === k ? null : k));
+  const costMap = (b: TsBucket) => breakdown === "tool" ? b.by_source : b.by_model;
+  const tokMap  = (b: TsBucket) => breakdown === "tool" ? b.tokens_by_source : b.tokens_by_model;
+  const labelFor = (key: string) => breakdown === "tool" ? (TOOL_META[key]?.label ?? key) : key;
+  const colorFor = (key: string, idx: number) =>
+    breakdown === "tool" ? (TOOL_META[key]?.color ?? COLORS[idx % COLORS.length]) : COLORS[idx % COLORS.length];
+
   const seriesKeys = useMemo(() => {
     const costs: Record<string, number> = {};
-    ts.forEach((b) => Object.entries(b.by_source).forEach(([k, v]) => { costs[k] = (costs[k] || 0) + v; }));
-    return Object.keys(costs).sort((a, b) => (costs[b] || 0) - (costs[a] || 0));
-  }, [ts]);
-  // Fill missing source keys with 0 so recharts stacked bars don't skip rendering
+    ts.forEach((b) => Object.entries(costMap(b)).forEach(([k, v]) => { costs[k] = (costs[k] || 0) + v; }));
+    return Object.keys(costs).filter((k) => costs[k] > 0).sort((a, b) => (costs[b] || 0) - (costs[a] || 0));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ts, breakdown]);
+  // Fill missing keys with 0 so recharts stacked bars don't skip rendering
   const chartData = useMemo(() => ts.map((b) => {
+    const cm = costMap(b);
     const pt: Record<string, number | string> = { bucket: b.bucket };
-    seriesKeys.forEach((k) => { pt[k] = b.by_source[k] ?? 0; });
+    seriesKeys.forEach((k) => { pt[k] = cm[k] ?? 0; });
     return pt;
-  }), [ts, seriesKeys]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [ts, seriesKeys, breakdown]);
 
   if (loading) return <div className="content"><div className="empty">Loading…</div></div>;
   if (err)     return <div className="content"><div className="empty">Error: {err}</div></div>;
@@ -145,7 +157,6 @@ export default function Dashboard({ onSelectTool, onReload }: { onSelectTool: (s
           {summary.tools.map((tool) => {
             const meta = TOOL_META[tool.source] || { label: tool.source, color: "var(--text-dim)" };
             const saving = tool.savings_eur; // positive = sub is cheaper
-            const noTokens = tool.source === "copilot";
             return (
               <div key={tool.source} className="tool-card" onClick={() => onSelectTool(tool.source)}
                 style={{ borderTop: `3px solid ${meta.color}` }}>
@@ -155,23 +166,19 @@ export default function Dashboard({ onSelectTool, onReload }: { onSelectTool: (s
                 </div>
                 <div className="tool-card-row">
                   <span className="tool-card-label">API cost</span>
-                  <span className="tool-card-value">{noTokens ? "N/A" : fmtEur(tool.cost_eur)}</span>
+                  <span className="tool-card-value">{fmtEur(tool.cost_eur)}</span>
                 </div>
                 <div className="tool-card-row">
                   <span className="tool-card-label">Subscription</span>
                   <span className="tool-card-value">{fmtEur(tool.sub_eur)}</span>
                 </div>
-                {!noTokens && (
-                  <div className="tool-card-row">
-                    <span className="tool-card-label">Tokens</span>
-                    <span className="tool-card-value">{fmtTok(tool.total_tokens)}</span>
-                  </div>
-                )}
-                {!noTokens && (
-                  <div className="tool-card-saving" style={{ color: saving > 0 ? "var(--accent2)" : "var(--danger)" }}>
-                    {saving > 0 ? `sub saves ${fmtEur(saving)}` : `API ${fmtEur(Math.abs(saving))} cheaper`}
-                  </div>
-                )}
+                <div className="tool-card-row">
+                  <span className="tool-card-label">Tokens</span>
+                  <span className="tool-card-value">{fmtTok(tool.total_tokens)}</span>
+                </div>
+                <div className="tool-card-saving" style={{ color: saving > 0 ? "var(--accent2)" : "var(--danger)" }}>
+                  {saving > 0 ? `sub saves ${fmtEur(saving)}` : `API ${fmtEur(Math.abs(saving))} cheaper`}
+                </div>
               </div>
             );
           })}
@@ -179,9 +186,16 @@ export default function Dashboard({ onSelectTool, onReload }: { onSelectTool: (s
 
         {/* Stacked bar chart */}
         <div className="chart-box">
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, gap: 12, flexWrap: "wrap" }}>
             <div className="section-title" style={{ margin: 0 }}>
-              {period === "daily" ? "Last 30 days" : period === "yearly" ? ref : "Calendar month"} — spend by tool
+              {period === "daily" ? "Last 30 days" : period === "yearly" ? ref : "Calendar month"} — spend by {breakdown}
+            </div>
+            <div className="seg" role="group" aria-label="Breakdown">
+              {(["tool", "model"] as const).map((b) => (
+                <button key={b} className={`seg-btn ${breakdown === b ? "active" : ""}`} onClick={() => { setBreakdown(b); setHighlightKey(null); }}>
+                  {b === "tool" ? "By tool" : "By model"}
+                </button>
+              ))}
             </div>
           </div>
           {chartData.length === 0 ? (
@@ -207,11 +221,11 @@ export default function Dashboard({ onSelectTool, onReload }: { onSelectTool: (s
                       <div style={{ background: "#ede3cc", border: "1px solid #d8c8a8", borderRadius: 6, fontFamily: "IBM Plex Mono", fontSize: 12, padding: "8px 10px", minWidth: 200 }}>
                         <div style={{ fontWeight: 600, marginBottom: 6 }}>{fmtBucketFull(String(label))}</div>
                         {items.map((p) => {
-                          const tok = bucket?.tokens_by_source[p.name] ?? 0;
+                          const tok = bucket ? (tokMap(bucket)[p.name] ?? 0) : 0;
                           return (
                             <div key={p.name} style={{ marginBottom: 4 }}>
                               <div style={{ display: "flex", justifyContent: "space-between", gap: 14, color: "#2d1a08" }}>
-                                <span><span style={{ color: p.color, marginRight: 6 }}>●</span>{TOOL_META[p.name]?.label ?? p.name}</span>
+                                <span><span style={{ color: p.color, marginRight: 6 }}>●</span>{labelFor(p.name)}</span>
                                 <span>{fmtEur(p.value)}</span>
                               </div>
                               {tok > 0 && (
@@ -230,13 +244,33 @@ export default function Dashboard({ onSelectTool, onReload }: { onSelectTool: (s
                   }}
                 />
                 {seriesKeys.map((k, i) => (
-                  <Bar key={k} dataKey={k} stackId="a" isAnimationActive={false} fill={TOOL_META[k]?.color ?? COLORS[i % COLORS.length]} radius={i === seriesKeys.length - 1 ? [3, 3, 0, 0] : undefined} />
+                  <Bar
+                    key={k}
+                    dataKey={k}
+                    stackId="a"
+                    isAnimationActive={false}
+                    fill={colorFor(k, i)}
+                    fillOpacity={highlightKey && highlightKey !== k ? 0.15 : 1}
+                    radius={i === seriesKeys.length - 1 ? [3, 3, 0, 0] : undefined}
+                    onClick={() => toggleHighlight(k)}
+                    style={{ cursor: "pointer" }}
+                  />
                 ))}
               </BarChart>
             </ResponsiveContainer>
-            <div style={{ display: "flex", gap: 14, justifyContent: "center", marginTop: 6, fontFamily: "IBM Plex Mono", fontSize: 11, color: "var(--text-dim)" }}>
-              {seriesKeys.map((k) => (
-                <span key={k}><span style={{ color: TOOL_META[k]?.color ?? "var(--text-dim)", marginRight: 4 }}>■</span>{TOOL_META[k]?.label ?? k}</span>
+            <div style={{ display: "flex", gap: 14, justifyContent: "center", marginTop: 6, fontFamily: "IBM Plex Mono", fontSize: 11, color: "var(--text-dim)", flexWrap: "wrap" }}>
+              {seriesKeys.map((k, i) => (
+                <span
+                  key={k}
+                  onClick={() => toggleHighlight(k)}
+                  style={{
+                    cursor: "pointer",
+                    opacity: highlightKey && highlightKey !== k ? 0.4 : 1,
+                    fontWeight: highlightKey === k ? 700 : 400,
+                  }}
+                >
+                  <span style={{ color: colorFor(k, i), marginRight: 4 }}>■</span>{labelFor(k)}
+                </span>
               ))}
             </div>
             </>

@@ -63,6 +63,7 @@ class ScanState(SQLModel, table=True):
     last_offset: int = 0
     last_scanned_at: datetime = Field(default_factory=datetime.utcnow)
     file_size: int = 0
+    last_model: Optional[str] = None    # codex: model in effect at last_offset, for incremental resume
 
 
 class Setting(SQLModel, table=True):

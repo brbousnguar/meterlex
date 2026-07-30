@@ -206,6 +206,14 @@ select:focus, input:focus { border-color: var(--accent); }
 }
 .btn.ghost:hover { background: var(--surface2); }
 .btn.sm { padding: 4px 10px; font-size: .76rem; }
+.seg { display: inline-flex; border: 1px solid var(--border-solid); border-radius: var(--radius); overflow: hidden; }
+.seg-btn {
+  background: none; color: var(--text-dim); border: none; cursor: pointer;
+  padding: 5px 12px; font-family: var(--disp); font-size: .76rem; font-weight: 600;
+  transition: background .12s, color .12s;
+}
+.seg-btn:hover { background: var(--surface2); }
+.seg-btn.active { background: var(--accent); color: #fff; }
 .price-input { width: 110px; font-family: var(--mono); }
 
 .back-link { cursor: pointer; color: var(--text-dim); font-size: .85rem; }

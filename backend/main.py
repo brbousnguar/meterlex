@@ -29,15 +29,20 @@ DEFAULT_SETTINGS = {
     "sub_codex_eur": "23.00",
     "sub_antigravity_eur": "18.33",
     "sub_ollama_eur": "18.18",
-    "sub_copilot_eur": "8.20",
+    "sub_copilot_eur": "0.00",
 }
 
+# Copilot CLI on this machine is logged into the SQLI work seat
+# (brbousnguar_SQLI), not the personal brbousnguar subscription — so the
+# personal cost is €0 here. We still seed per-month bills (at €0) so the
+# variable-charge tracking stays in place, but savings reduce to the
+# consumption-equivalent API cost — the number that steers real usage.
 COPILOT_HISTORY = {
-    "2026-01": 8.54,
-    "2026-02": 8.49,
-    "2026-03": 8.67,
-    "2026-04": 8.68,
-    "2026-07": 7.63,
+    "2026-01": 0.0,
+    "2026-02": 0.0,
+    "2026-03": 0.0,
+    "2026-04": 0.0,
+    "2026-07": 0.0,
 }
 
 
@@ -58,6 +63,32 @@ async def lifespan(app: FastAPI):
             "UPDATE usage_turns SET source='ollama' "
             "WHERE source='claude-code' AND (model_id LIKE 'glm-%' OR model_id LIKE 'local/%')"
         ))
+        # One-time: this machine's Copilot CLI runs under the SQLI work seat,
+        # not the paid personal subscription, so zero any previously-seeded
+        # Copilot bills. Guarded so it runs once and never clobbers future
+        # manual edits made via the UI.
+        if not session.get(Setting, "migrated_copilot_zero_v2"):
+            for ym, _ in COPILOT_HISTORY.items():
+                bill = session.get(ManualBill, ("copilot", ym))
+                if bill and bill.amount_eur != 0.0:
+                    bill.amount_eur = 0.0
+                    session.add(bill)
+            sub_row = session.get(Setting, "sub_copilot_eur")
+            if sub_row and sub_row.value != "0.00":
+                sub_row.value = "0.00"
+                session.add(sub_row)
+            session.add(Setting(key="migrated_copilot_zero_v2", value="1"))
+        # One-time: earlier Codex ingestion hardcoded every paid turn's
+        # model_id to "gpt-5" instead of reading the real per-turn model
+        # from turn_context.model (gpt-5.4, gpt-5.5, gpt-5.6-sol, etc).
+        # v2: the first fix tracked the model in-memory per scan but didn't
+        # persist it across incremental (60s) scans, so turns ingested
+        # between deploys still got mistagged "gpt-5". Purge again now that
+        # ScanState.last_model carries the model across incremental scans.
+        # Startup always runs a full rescan (offset 0), so this is safe.
+        if not session.get(Setting, "migrated_codex_model_reimport_v2"):
+            session.execute(text("DELETE FROM usage_turns WHERE source='codex'"))
+            session.add(Setting(key="migrated_codex_model_reimport_v2", value="1"))
         session.commit()
     task = asyncio.create_task(ingest.ingest_loop())
     log.info("ingest loop started")
@@ -283,14 +314,34 @@ def spend_timeseries(
         ).where(*base).group_by(bucket_expr, UsageTurn.source)
     ).all()
 
+    # Per-bucket by-model split (for the "spend by model" chart view).
+    model_rows = session.exec(
+        select(
+            bucket_expr,
+            UsageTurn.model_id,
+            func.sum(UsageTurn.cost_eur),
+            func.sum(UsageTurn.total_tokens),
+        ).where(*base).group_by(bucket_expr, UsageTurn.model_id)
+    ).all()
+
     buckets = {}
     for b, src, cost, n, tok in rows:
-        entry = buckets.setdefault(b, {"bucket": b, "cost_eur": 0.0, "turns": 0, "by_source": {}, "tokens_by_source": {}})
+        entry = buckets.setdefault(b, {"bucket": b, "cost_eur": 0.0, "turns": 0,
+                                       "by_source": {}, "tokens_by_source": {},
+                                       "by_model": {}, "tokens_by_model": {}})
         cost = round(cost or 0, 4)
         entry["cost_eur"] = round(entry["cost_eur"] + cost, 4)
         entry["turns"] += int(n)
         entry["by_source"][src] = round(entry["by_source"].get(src, 0) + cost, 4)
         entry["tokens_by_source"][src] = entry["tokens_by_source"].get(src, 0) + int(tok or 0)
+
+    for b, mid, cost, tok in model_rows:
+        entry = buckets.setdefault(b, {"bucket": b, "cost_eur": 0.0, "turns": 0,
+                                       "by_source": {}, "tokens_by_source": {},
+                                       "by_model": {}, "tokens_by_model": {}})
+        mid = mid or "(unknown)"
+        entry["by_model"][mid] = round(entry["by_model"].get(mid, 0) + (cost or 0), 4)
+        entry["tokens_by_model"][mid] = entry["tokens_by_model"].get(mid, 0) + int(tok or 0)
 
     return [buckets[k] for k in sorted(buckets)]
 

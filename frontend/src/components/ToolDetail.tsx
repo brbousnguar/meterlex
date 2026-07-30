@@ -30,8 +30,11 @@ type SortDir = "desc" | "asc";
 
 export default function ToolDetail({ source, onBack }: { source: string; onBack: () => void }) {
   const meta = TOOL_META[source] ?? { label: source, color: "var(--accent)" };
-  const noApiCost = source === "copilot";
-  const noModels  = source === "copilot";
+  // Copilot CLI usage is now ingested from ~/.copilot/data.db, so Copilot is
+  // treated like any other token-producing source. Flags kept false to
+  // preserve the conditional layout used for the other tools.
+  const noApiCost = false;
+  const noModels  = false;
 
   const [period, setPeriod] = useState<"monthly" | "daily" | "yearly">("monthly");
   const [ref,    setRef]    = useState(MONTHS[0].val);
@@ -290,11 +293,17 @@ export default function ToolDetail({ source, onBack }: { source: string; onBack:
             </p>
           </div>
         )}
-        {noApiCost && (
+        {source === "copilot" && (
           <div className="chart-box">
             <div className="section-title">Note</div>
             <p style={{ fontSize: ".84rem", color: "var(--text-dim)", lineHeight: 1.6 }}>
-              GitHub Copilot does not expose per-turn token data locally. Only subscription costs are tracked — actual billing amounts are seeded in Prices &amp; settings.
+              API cost here reflects <strong>Copilot CLI</strong> usage only — per-session token
+              totals read from <code>~/.copilot/data.db</code>. In-editor Copilot usage is not
+              exposed locally and is not counted. The CLI reports <code>model = &quot;auto&quot;</code>,
+              so tokens are priced at a representative rate (<code>copilot-auto</code>, editable in
+              Prices &amp; settings). Only recent sessions are retained by the CLI, so older usage
+              is not recoverable. Subscription costs come from the monthly bills seeded in
+              Prices &amp; settings.
             </p>
           </div>
         )}

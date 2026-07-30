@@ -1,4 +1,4 @@
-<svg viewBox="0 0 34 34" xmlns="http://www.w3.org/2000/svg">
+<svg width="34" height="34" viewBox="0 0 34 34" xmlns="http://www.w3.org/2000/svg">
   <!-- Background chip -->
   <rect width="34" height="34" rx="7" fill="#c8620a"/>
   <!-- Subtle inner highlight -->
