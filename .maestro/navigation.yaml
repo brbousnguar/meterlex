@@ -1,0 +1,12 @@
+url: http://localhost:5180
+---
+- launchApp
+- tapOn:
+    css: '[data-testid="nav-codex"]'
+- assertVisible: "Codex"
+- tapOn:
+    css: '[data-testid="nav-dashboard"]'
+- assertVisible: "Spend dashboard"
+- tapOn:
+    css: '[data-testid="nav-prices"]'
+- assertVisible: "Prices & settings"

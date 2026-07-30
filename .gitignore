@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.env
+
+# Node
+node_modules/
+dist/
+
+# Data
+data/*.db
+data/*.db-shm
+data/*.db-wal
+data/*
+!data/.gitkeep
+*.sqlite
+*.sqlite3
+coverage.xml
+.coverage
+htmlcov/
+.pytest_cache/
+.maestro/screenshots/
+.maestro/reports/
+
+# OS
+.DS_Store

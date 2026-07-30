@@ -1,0 +1,37 @@
+name: meterlex
+
+services:
+  backend:
+    build: ./backend
+    container_name: meterlex-backend
+    environment:
+      DB_PATH: /app/data/meterlex.db
+      CLAUDE_CODE_DIR: /cc-projects
+      CODEX_DIR: /codex-sessions
+      AGY_DIR: /agy
+      COPILOT_DIR: /copilot
+      SCAN_INTERVAL_SEC: "60"
+    volumes:
+      - ./data:/app/data
+      # Host source paths come from .env (see .env.example). Read-only.
+      - ${CLAUDE_CODE_PROJECTS:?Set CLAUDE_CODE_PROJECTS in .env (copy .env.example)}:/cc-projects:ro
+      - ${CODEX_SESSIONS:?Set CODEX_SESSIONS in .env (copy .env.example)}:/codex-sessions:ro
+      - ${AGY_DIR:?Set AGY_DIR in .env (copy .env.example)}:/agy:ro
+      - ${COPILOT_CLI_DIR:?Set COPILOT_CLI_DIR in .env (copy .env.example)}:/copilot:ro
+    ports:
+      - "8692:8692"
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    container_name: meterlex-frontend
+    environment:
+      BACKEND_URL: http://backend:8692
+      NGINX_ENVSUBST_TEMPLATE_VARS: BACKEND_URL
+    ports:
+      - "5180:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes: {}

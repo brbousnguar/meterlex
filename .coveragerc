@@ -1,0 +1,8 @@
+[run]
+source = backend
+omit =
+    backend/tests/*
+
+[report]
+show_missing = true
+fail_under = 35

@@ -1,0 +1,7 @@
+url: http://localhost:5180
+---
+- launchApp
+- assertVisible: "Spend dashboard"
+- assertVisible: "API-equivalent cost"
+- assertVisible: "Subscriptions paid"
+- assertVisible: "Saved vs API rates"
