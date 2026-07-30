@@ -1,0 +1,16 @@
+<svg viewBox="0 0 34 34" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background chip -->
+  <rect width="34" height="34" rx="7" fill="#c8620a"/>
+  <!-- Subtle inner highlight -->
+  <rect x="1" y="1" width="32" height="16" rx="6" fill="rgba(255,255,255,0.07)"/>
+  <!-- Terminal chevron > -->
+  <polyline points="6,12 11,17 6,22" stroke="#f7f0e3" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Underscore cursor _ -->
+  <line x1="13" y1="22" x2="16" y2="22" stroke="#f7f0e3" stroke-width="2" stroke-linecap="round" opacity="0.7"/>
+  <!-- Rising spend bars -->
+  <rect x="18" y="21" width="3" height="6" fill="#f7f0e3" rx="1" opacity="0.55"/>
+  <rect x="23" y="16" width="3" height="11" fill="#f7f0e3" rx="1" opacity="0.75"/>
+  <rect x="28" y="11" width="3" height="16" fill="#f7f0e3" rx="1" opacity="0.95"/>
+  <!-- Trend line connecting tops -->
+  <polyline points="19.5,21 24.5,16 29.5,11" stroke="rgba(247,240,227,0.5)" stroke-width="1" fill="none" stroke-dasharray="2 1"/>
+</svg>

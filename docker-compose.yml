@@ -1,0 +1,34 @@
+name: agentic-spend-webapp
+
+services:
+  backend:
+    build: ./backend
+    container_name: agentic-spend-backend
+    environment:
+      DB_PATH: /app/data/agentic-spend.db
+      CLAUDE_CODE_DIR: /cc-projects
+      CODEX_DIR: /codex-sessions
+      AGY_DIR: /agy
+      SCAN_INTERVAL_SEC: "60"
+    volumes:
+      - ./data:/app/data
+      - ${CLAUDE_CODE_PROJECTS:-/Users/boss/.claude/projects}:/cc-projects:ro
+      - ${CODEX_SESSIONS:-/Users/boss/.codex/sessions}:/codex-sessions:ro
+      - ${AGY_DIR:-/Users/boss/.gemini/antigravity-cli}:/agy:ro
+    ports:
+      - "8692:8692"
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    container_name: agentic-spend-frontend
+    environment:
+      BACKEND_URL: http://backend:8692
+      NGINX_ENVSUBST_TEMPLATE_VARS: BACKEND_URL
+    ports:
+      - "5180:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes: {}
