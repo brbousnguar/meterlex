@@ -129,8 +129,6 @@ export const api = {
   spend: (q: string) => get<SpendResp>(`/api/spend${q}`),
   timeseries: (q: string) => get<TsBucket[]>(`/api/spend/timeseries${q}`),
   prices: () => get<PriceRow[]>("/api/prices"),
-  patchPrice: (id: string, body: Partial<PriceRow>) =>
-    patch<{ model_id: string }>(`/api/prices/${encodeURIComponent(id)}`, body),
   settings: () => get<Settings>("/api/settings"),
   patchSettings: (body: Partial<Settings>) => patch<Settings>("/api/settings", body),
   scan: () => post<unknown>("/api/scan"),

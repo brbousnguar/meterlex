@@ -1,43 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { api, type PriceRow, type Settings, type ManualBill } from "../api";
-
-function PriceCell({ value, onSave }: { value: number; onSave: (v: number) => void }) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(String((value * 1_000_000).toFixed(4)));
-  const ref = useRef<HTMLInputElement>(null);
-
-  useEffect(() => { if (editing) ref.current?.select(); }, [editing]);
-
-  const commit = () => {
-    const n = parseFloat(draft);
-    if (!isNaN(n)) onSave(n / 1_000_000);
-    setEditing(false);
-  };
-
-  if (editing) {
-    return (
-      <input
-        ref={ref}
-        className="price-input"
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={commit}
-        onKeyDown={(e) => { if (e.key === "Enter") commit(); if (e.key === "Escape") setEditing(false); }}
-        autoFocus
-      />
-    );
-  }
-  return (
-    <span
-      className="mono"
-      style={{ cursor: "pointer", borderBottom: "1px dashed var(--border-solid)", paddingBottom: 1 }}
-      onClick={() => { setDraft(String((value * 1_000_000).toFixed(4))); setEditing(true); }}
-      title="Click to edit"
-    >
-      ${(value * 1_000_000).toFixed(2)}
-    </span>
-  );
-}
 
 export default function PricesSettings({ onReload }: { onReload: () => void }) {
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -76,13 +38,6 @@ export default function PricesSettings({ onReload }: { onReload: () => void }) {
       onReload();
     } catch (e) { console.error(e); }
     finally { setSaving(false); }
-  };
-
-  const patchPrice = async (id: string, field: "prompt" | "completion" | "cache_read" | "cache_write", val: number) => {
-    try {
-      await api.patchPrice(id, { [field]: val });
-      setPrices((prev) => prev.map((p) => p.model_id === id ? { ...p, [field]: val } : p));
-    } catch (e) { console.error(e); }
   };
 
   const saveBill = async (year_month: string, amount_eur: number) => {
@@ -190,11 +145,11 @@ export default function PricesSettings({ onReload }: { onReload: () => void }) {
           </div>
         </div>
 
-        {/* Model prices */}
+        {/* Model prices — mirrored read-only from the model-prices service */}
         <div className="chart-box">
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
             <div className="section-title" style={{ margin: 0 }}>Model prices</div>
-            <span style={{ fontFamily: "var(--mono)", fontSize: ".68rem", color: "var(--text-faint)" }}>USD per 1M tokens — click a price to edit</span>
+            <span style={{ fontFamily: "var(--mono)", fontSize: ".68rem", color: "var(--text-faint)" }}>USD per 1M tokens — read-only, mirrored weekly</span>
           </div>
           <table className="tbl">
             <thead>
@@ -216,10 +171,10 @@ export default function PricesSettings({ onReload }: { onReload: () => void }) {
                 <tr key={p.model_id}>
                   <td className="mono">{p.display_name || p.model_id}</td>
                   <td className="dim" style={{ fontSize: ".78rem" }}>{p.provider}</td>
-                  <td className="right"><PriceCell value={p.prompt}      onSave={(v) => patchPrice(p.model_id, "prompt",      v)} /></td>
-                  <td className="right"><PriceCell value={p.completion}  onSave={(v) => patchPrice(p.model_id, "completion",  v)} /></td>
-                  <td className="right"><PriceCell value={p.cache_read}  onSave={(v) => patchPrice(p.model_id, "cache_read",  v)} /></td>
-                  <td className="right"><PriceCell value={p.cache_write} onSave={(v) => patchPrice(p.model_id, "cache_write", v)} /></td>
+                  <td className="right mono">${(p.prompt * 1_000_000).toFixed(2)}</td>
+                  <td className="right mono">${(p.completion * 1_000_000).toFixed(2)}</td>
+                  <td className="right mono">${(p.cache_read * 1_000_000).toFixed(2)}</td>
+                  <td className="right mono">${(p.cache_write * 1_000_000).toFixed(2)}</td>
                   <td>
                     <span className={`badge ${p.source === "manual" ? "manual" : p.source === "seed" ? "seed" : ""}`}>
                       {p.source}
@@ -230,7 +185,9 @@ export default function PricesSettings({ onReload }: { onReload: () => void }) {
             </tbody>
           </table>
           <p style={{ fontFamily: "var(--mono)", fontSize: ".68rem", color: "var(--text-faint)", marginTop: 12 }}>
-            After editing prices, click "Recompute all costs" above to apply the new rates to all historical turns.
+            Edit prices at the <a href="http://localhost:5181" target="_blank" rel="noreferrer">model-prices app</a> —
+            this table mirrors it. A weekly cron (Monday 05:00) pulls the latest rates here and recomputes every
+            historical turn; use "Recompute all costs" above to do that on demand.
           </p>
         </div>
       </div>
