@@ -11,6 +11,9 @@ services:
       AGY_DIR: /agy
       COPILOT_DIR: /copilot
       SCAN_INTERVAL_SEC: "60"
+      # model-prices runs on the host (docker-compose project of its own),
+      # not on this container's network — reach it via the host gateway.
+      MODEL_PRICES_URL: http://host.docker.internal:8693
     volumes:
       - ./data:/app/data
       # Host source paths come from .env (see .env.example). Read-only.

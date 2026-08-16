@@ -1,9 +1,17 @@
+import asyncio
+
 from models import ModelPrice, Setting
 import pricing
 
 
-def test_seed_and_compute_all_token_classes(session):
-    pricing.seed_prices(session)
+def _seed(session, model_id, **rates):
+    session.add(ModelPrice(model_id=model_id, source="seed", **rates))
+    session.commit()
+
+
+def test_compute_cost_for_all_token_classes(session):
+    _seed(session, "claude-sonnet-4-6",
+          prompt=3e-6, completion=15e-6, cache_read=0.3e-6, cache_write=3.75e-6)
     cost, source = pricing.compute_cost(
         session,
         "anthropic",
@@ -15,15 +23,7 @@ def test_seed_and_compute_all_token_classes(session):
     assert source == "seed"
 
 
-def test_manual_price_is_not_overwritten(session):
-    session.add(ModelPrice(model_id="gpt-5", prompt=0.123, source="manual"))
-    session.commit()
-    pricing.seed_prices(session)
-    assert session.get(ModelPrice, "gpt-5").prompt == 0.123
-
-
 def test_unknown_and_local_models_are_free(session):
-    pricing.seed_prices(session)
     assert pricing.compute_cost(session, "ollama", "local/qwen", {"input": 99}) == (0.0, "free")
     assert pricing.compute_cost(session, "unknown", "not-on-rate-card", {"input": 99}) == (0.0, "free")
 
@@ -32,3 +32,60 @@ def test_fx_rate_falls_back_for_invalid_setting(session):
     session.add(Setting(key="fx_rate", value="not-a-number"))
     session.commit()
     assert pricing.get_fx_rate(session) == 0.92
+
+
+class _FakeResponse:
+    def __init__(self, payload):
+        self._payload = payload
+
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return self._payload
+
+
+class _FakeAsyncClient:
+    def __init__(self, payload, *_a, **_kw):
+        self._payload = payload
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    async def get(self, _url):
+        return _FakeResponse(self._payload)
+
+
+def test_mirror_pull_replaces_local_table(session, monkeypatch):
+    session.add(ModelPrice(model_id="stale-model-no-longer-in-central", source="seed"))
+    session.commit()
+
+    payload = [{
+        "model_id": "claude-sonnet-4-6", "display_name": "Claude Sonnet 4.6",
+        "provider": "anthropic", "prompt": 3e-6, "completion": 15e-6,
+        "cache_read": 0.3e-6, "cache_write": 3.75e-6, "reasoning": 0.0,
+        "source": "seed", "overrides": [],
+    }]
+    monkeypatch.setattr(pricing.httpx, "AsyncClient", lambda *a, **kw: _FakeAsyncClient(payload))
+
+    result = asyncio.run(pricing.mirror_pull_prices(session))
+
+    assert result == {"synced": True, "count": 1, "error": None}
+    assert session.get(ModelPrice, "stale-model-no-longer-in-central") is None
+    row = session.get(ModelPrice, "claude-sonnet-4-6")
+    assert row is not None and row.prompt == 3e-6
+
+
+def test_mirror_pull_keeps_existing_rows_on_empty_response(session, monkeypatch):
+    session.add(ModelPrice(model_id="claude-sonnet-4-6", prompt=3e-6, source="seed"))
+    session.commit()
+
+    monkeypatch.setattr(pricing.httpx, "AsyncClient", lambda *a, **kw: _FakeAsyncClient([]))
+
+    result = asyncio.run(pricing.mirror_pull_prices(session))
+
+    assert result["synced"] is False
+    assert session.get(ModelPrice, "claude-sonnet-4-6") is not None

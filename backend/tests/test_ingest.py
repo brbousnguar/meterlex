@@ -1,9 +1,8 @@
 import json
 from datetime import datetime
 
-from models import UsageTurn
+from models import ModelPrice, UsageTurn
 import ingest
-import pricing
 
 
 def test_parser_helpers_cover_invalid_values():
@@ -15,7 +14,9 @@ def test_parser_helpers_cover_invalid_values():
 
 
 def test_claude_jsonl_skips_bad_lines_and_ingests_complete_event(tmp_path, session):
-    pricing.seed_prices(session)
+    session.add(ModelPrice(model_id="claude-sonnet-4-6", prompt=3e-6, completion=15e-6,
+                            cache_read=0.3e-6, cache_write=3.75e-6, source="seed"))
+    session.commit()
     path = tmp_path / "session.jsonl"
     event = {
         "type": "assistant",

@@ -172,7 +172,7 @@ Contributions are covered by the [MIT License](LICENSE); see
   change without notice.
 - Historical data is limited to what each local tool still retains.
 - Model aliases and bundled/automatic model selection may require approximate
-  pricing; all rates can be overridden in the UI.
+  pricing; rates are overridden at the model-prices service, not in this UI.
 - The application does not authenticate users or encrypt its SQLite database.
 - Figures are estimates for engineering insight, not invoices or accounting
   records.
@@ -193,8 +193,8 @@ paths.
 | `GET` | `/api/summary` | Per-tool cost summary with subscription comparison |
 | `GET` | `/api/spend` | Aggregated spend for a period, with model and project breakdown |
 | `GET` | `/api/spend/timeseries` | Bucketed series (daily / monthly / yearly) with per-source splits |
-| `GET` | `/api/prices` | All model prices |
-| `PATCH` | `/api/prices/{model_id}` | Manual price override |
+| `GET` | `/api/prices` | All model prices (mirrored from the model-prices service) |
+| `POST` | `/api/prices/mirror-pull` | Pull latest rates from model-prices and recompute all costs |
 | `GET/PATCH` | `/api/settings` | FX rate and per-tool subscription amounts |
 | `GET` | `/api/bills/{source}` | Per-month manual bills (used for variable Copilot charges) |
 | `PATCH` | `/api/bills/{source}/{year_month}` | Set or update a monthly bill |
@@ -203,7 +203,7 @@ paths.
 
 ## Pricing policy
 
-Seed prices come from public Anthropic, OpenAI, Google, and Z.AI rate cards and are stored in `pricing.py`. Manual overrides via the UI win over seed values. Gemini models without an exact match fall back to the generic flash-tier entry; unrecognised `glm-*` IDs fall back to the GLM-5.2 tier. Cloud GLM models are billed at official Z.AI rates — only truly local Ollama models (`local/*`) and `<synthetic>` events are priced at €0. FX defaults to 0.92 (USD → EUR), editable in settings. After changing a price or the FX rate, hit **Recompute all costs** to reapply to history.
+The rate card itself lives in [model-prices](https://github.com/brbousnguar/model-prices), a small shared service also used by openclaw-spend, and is mirrored into Meterlex's local `model_prices` table (read-only here — edit rates there, not in this app). A weekly cron pulls the latest rates into both apps every Monday at 05:00 and recomputes historical costs; use **Recompute all costs** to do that on demand. Gemini models without an exact match fall back to the generic flash-tier entry; unrecognised `glm-*` IDs fall back to the GLM-5.2 tier; unrecognised `gpt-5*` IDs fall back to the base GPT-5 tier — this fallback logic itself stays local to Meterlex. Cloud GLM models are billed at official Z.AI rates — only truly local Ollama models (`local/*`) and `<synthetic>` events are priced at €0. FX defaults to 0.92 (USD → EUR), editable in settings.
 
 ## Visual identity
 

@@ -7,8 +7,6 @@ import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from typing import Optional
-from urllib.parse import unquote
-
 from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Session, select, func
@@ -338,18 +336,15 @@ def list_prices(session: Session = Depends(get_session)):
     } for r in rows]
 
 
-@app.patch("/api/prices/{model_id:path}")
-def update_price(model_id: str, payload: dict, session: Session = Depends(get_session)):
-    mid = unquote(model_id)
-    row = session.get(ModelPrice, mid) or ModelPrice(model_id=mid)
-    for k in ("display_name", "provider", "prompt", "completion", "cache_read", "cache_write", "reasoning"):
-        if k in payload:
-            setattr(row, k, payload[k])
-    row.source = "manual"
-    row.updated_at = datetime.utcnow()
-    session.add(row)
-    session.commit()
-    return {"model_id": row.model_id, "source": row.source}
+@app.post("/api/prices/mirror-pull")
+async def mirror_pull_prices(session: Session = Depends(get_session)):
+    """Pull the latest rate card from the central model-prices service and
+    recompute every historical turn's cost against it. Called by the weekly
+    launchd cron (Monday 05:00); prices are edited in model-prices, not here."""
+    result = await pricing.mirror_pull_prices(session)
+    if result["synced"]:
+        result["rows_recomputed"] = ingest.recompute_costs()
+    return result
 
 
 # ── settings ──────────────────────────────────────────────────────────────────

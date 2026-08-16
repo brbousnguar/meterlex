@@ -713,7 +713,7 @@ def _do_scan(full: bool) -> dict:
 async def ingest_loop():
     create_db()
     with Session(engine) as session:
-        pricing.seed_prices(session)
+        await pricing.mirror_pull_prices(session)
     await asyncio.to_thread(_do_scan, True)
 
     while True:
