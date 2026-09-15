@@ -131,7 +131,6 @@ export const api = {
   prices: () => get<PriceRow[]>("/api/prices"),
   settings: () => get<Settings>("/api/settings"),
   patchSettings: (body: Partial<Settings>) => patch<Settings>("/api/settings", body),
-  scan: () => post<unknown>("/api/scan"),
   recompute: () => post<{ rows_updated: number }>("/api/recompute"),
   bills: (source: string) => get<ManualBill[]>(`/api/bills/${encodeURIComponent(source)}`),
   patchBill: (source: string, year_month: string, body: { amount_eur: number }) =>

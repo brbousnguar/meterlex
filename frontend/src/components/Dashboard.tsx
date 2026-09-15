@@ -128,7 +128,7 @@ export default function Dashboard({ onSelectTool, onReload }: { onSelectTool: (s
               {YEARS.map((y) => <option key={y} value={y}>{y}</option>)}
             </select>
           )}
-          <button className="btn ghost sm" onClick={() => api.scan().then(onReload)}>↻ Rescan</button>
+          <button className="btn ghost sm" onClick={onReload} title="Collectors send new usage every 5 minutes">↻ Refresh</button>
         </div>
       </div>
 
