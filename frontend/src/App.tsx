@@ -10,6 +10,7 @@ const TOOLS = [
   { source: "claude-code", label: "Claude Code", icon: "◆" },
   { source: "codex",       label: "Codex",        icon: "⬡" },
   { source: "antigravity", label: "Antigravity",  icon: "⬢" },
+  { source: "gemini-cli",  label: "Gemini CLI",   icon: "✦" },
   { source: "ollama",      label: "Ollama",        icon: "◎" },
   { source: "copilot",     label: "Copilot",       icon: "⊗" },
 ];

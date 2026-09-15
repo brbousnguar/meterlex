@@ -6,23 +6,18 @@ services:
     container_name: meterlex-backend
     environment:
       DB_PATH: /app/data/meterlex.db
-      CLAUDE_CODE_DIR: /cc-projects
-      CODEX_DIR: /codex-sessions
-      AGY_DIR: /agy
-      COPILOT_DIR: /copilot
-      SCAN_INTERVAL_SEC: "60"
+      # The machine the hub's own history came from, before collectors
+      # reported per machine: its collector's machine name (see .env.example).
+      HUB_MACHINE: ${HUB_MACHINE:-hub}
       # model-prices runs on the host (docker-compose project of its own),
       # not on this container's network — reach it via the host gateway.
       MODEL_PRICES_URL: http://host.docker.internal:8693
     volumes:
+      # The database only: collectors on each machine read the session logs
+      # and POST their counts to /api/ingest, so no transcript is mounted.
       - ./data:/app/data
-      # Host source paths come from .env (see .env.example). Read-only.
-      - ${CLAUDE_CODE_PROJECTS:?Set CLAUDE_CODE_PROJECTS in .env (copy .env.example)}:/cc-projects:ro
-      - ${CODEX_SESSIONS:?Set CODEX_SESSIONS in .env (copy .env.example)}:/codex-sessions:ro
-      - ${AGY_DIR:?Set AGY_DIR in .env (copy .env.example)}:/agy:ro
-      - ${COPILOT_CLI_DIR:?Set COPILOT_CLI_DIR in .env (copy .env.example)}:/copilot:ro
     ports:
-      - "8692:8692"
+      - "127.0.0.1:8692:8692"
     restart: unless-stopped
 
   frontend:
@@ -32,7 +27,9 @@ services:
       BACKEND_URL: http://backend:8692
       NGINX_ENVSUBST_TEMPLATE_VARS: BACKEND_URL
     ports:
-      - "5180:80"
+      # loopback only; other machines reach the UI and /api/ingest through
+      # `tailscale serve --bg --https=5180 http://127.0.0.1:5180`
+      - "127.0.0.1:5180:80"
     depends_on:
       - backend
     restart: unless-stopped

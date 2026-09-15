@@ -1,10 +1,10 @@
 """Price resolution for Meterlex.
 
-The rate card itself now lives in the model-prices service (webapps/model-prices)
+The rate card itself lives in the model-prices service (webapps/model-prices)
 and is mirrored into the local model_prices table — see mirror_pull_prices()
 below. This module keeps the resolve/fallback logic, which is Meterlex-specific
-(e.g. the copilot-auto stand-in, dated-variant fallbacks) and doesn't belong
-in the shared service.
+(e.g. Ollama routing, the copilot-auto stand-in, dated-variant fallbacks) and
+doesn't belong in the shared service.
 """
 import logging
 import os
@@ -72,28 +72,50 @@ async def mirror_pull_prices(session: Session) -> dict:
     return {"synced": True, "count": n, "error": None}
 
 
-def resolve_price(session: Session, model_id: str) -> Optional[ModelPrice]:
+def ollama_cloud_id(model_id: str) -> str:
+    """model-prices keys Ollama Cloud rows as `ollama/<model>:cloud`."""
+    m = model_id.split("/", 1)[1] if model_id.startswith("ollama/") else model_id
+    for suffix in (":cloud", "-cloud"):
+        if m.endswith(suffix):
+            m = m[: -len(suffix)]
+    return f"ollama/{m}:cloud"
+
+
+def resolve_price(session: Session, model_id: str, source: Optional[str] = None) -> Optional[ModelPrice]:
+    if source == "ollama":
+        # A model Ollama sells in its cloud is billed at Ollama's own rate;
+        # anything else Ollama served ran on this machine, for free.
+        row = session.get(ModelPrice, ollama_cloud_id(model_id))
+        if row or not model_id.endswith((":cloud", "-cloud")):
+            return row
     row = session.get(ModelPrice, model_id)
     if row:
         return row
+    m = model_id.lower()
     # Generic Gemini fallback for unrecognised gemini-* model IDs
-    if model_id.lower().startswith("gemini"):
+    if m.startswith("gemini"):
         return session.get(ModelPrice, "gemini")
     # Generic GLM fallback for unrecognised glm-* IDs (e.g. dated variants)
-    if model_id.lower().startswith("glm-"):
+    if m.startswith("glm-"):
         return session.get(ModelPrice, "glm-5.2")
     # Generic Codex fallback for unrecognised gpt-5* IDs (new dated variants)
-    if model_id.lower().startswith("gpt-5"):
+    if m.startswith("gpt-5"):
         return session.get(ModelPrice, "gpt-5")
+    # Claude Code names Haiku 4.5 with or without its date
+    if m.startswith("claude-haiku-4-5"):
+        return session.get(ModelPrice, "claude-haiku-4-5-20251001")
+    # Copilot CLI: a model with no rate of its own gets the representative one
+    if source == "copilot":
+        return session.get(ModelPrice, "copilot-auto")
     return None
 
 
-def compute_cost(session: Session, provider: str, model_id: str, usage: dict):
+def compute_cost(session: Session, provider: str, model_id: str, usage: dict, source: Optional[str] = None):
     """Returns (cost_usd, source)."""
     if _is_free(model_id):
         return (0.0, "free")
 
-    row = resolve_price(session, model_id)
+    row = resolve_price(session, model_id, source)
     if row is None:
         return (0.0, "free")
 

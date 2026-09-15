@@ -4,8 +4,8 @@ from sqlmodel import SQLModel, create_engine, Session
 
 DB_PATH = os.getenv("DB_PATH", "/app/data/meterlex.db")
 # timeout: how long a connection waits on SQLite's write lock before raising
-# "database is locked" (default is 5s, too short given the ingest loop can
-# hold the lock across a multi-file scan commit).
+# "database is locked" (default is 5s, too short when a large ingest batch
+# holds the lock across its commit).
 engine = create_engine(
     f"sqlite:///{DB_PATH}",
     connect_args={"check_same_thread": False, "timeout": 30},
@@ -14,7 +14,7 @@ engine = create_engine(
 
 @event.listens_for(engine, "connect")
 def _set_sqlite_pragma(dbapi_conn, _):
-    # WAL lets readers (API requests) proceed while the ingest loop is
+    # WAL lets readers (API requests) proceed while an ingest batch is
     # mid-write, instead of blocking/erroring on the writer's lock.
     cursor = dbapi_conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL")
@@ -22,20 +22,32 @@ def _set_sqlite_pragma(dbapi_conn, _):
     cursor.close()
 
 
-def create_db():
+def create_db(target=None):
     import models  # noqa: F401 — ensure all tables are registered before create_all
-    SQLModel.metadata.create_all(engine)
-    _migrate_columns()
+    target = target or engine
+    SQLModel.metadata.create_all(target)
+    _migrate_columns(target)
 
 
-def _migrate_columns():
+def _migrate_columns(target):
     # SQLModel's create_all() never alters existing tables, so new columns
     # need an explicit ALTER TABLE guarded by a schema check.
-    with engine.connect() as conn:
+    from models import HUB_MACHINE
+
+    with target.connect() as conn:
         cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(scan_state)")}
-        if "last_model" not in cols:
+        if cols and "last_model" not in cols:
             conn.exec_driver_sql("ALTER TABLE scan_state ADD COLUMN last_model TEXT")
-            conn.commit()
+        turn_cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(usage_turns)")}
+        if "machine" not in turn_cols:
+            # every row so far came from the hub's own scanner (a column
+            # default can't be a bound parameter, hence the literal)
+            name = HUB_MACHINE.replace("'", "")
+            conn.exec_driver_sql(f"ALTER TABLE usage_turns ADD COLUMN machine VARCHAR NOT NULL DEFAULT '{name}'")
+            conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_usage_turns_machine ON usage_turns (machine)")
+        if "origin" not in turn_cols:
+            conn.exec_driver_sql("ALTER TABLE usage_turns ADD COLUMN origin VARCHAR")
+        conn.commit()
 
 
 def get_session():

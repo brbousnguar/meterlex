@@ -1,34 +1,40 @@
-"""Meterlex API — tracks Claude Code, Codex, and Antigravity usage.
+"""Meterlex API — AI coding usage from every machine, priced.
 
-Ports: API 8692, UI 5180.
+Collectors on each machine POST their usage to /api/ingest with the machine's
+key; everything else is read-only views over the stored turns.
+Ports: API 8692, UI 5180 (both bound to 127.0.0.1; reach the UI over Tailscale).
 """
 import asyncio
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from typing import Optional
-from fastapi import FastAPI, Depends, HTTPException, Query
+from fastapi import FastAPI, Depends, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Session, select, func
 
 from database import engine, create_db, get_session
-from models import UsageTurn, ModelPrice, Setting, ManualBill
+from models import UsageTurn, ModelPrice, Setting, ManualBill, Machine
 import pricing
 import ingest
+import machines
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s %(message)s")
 log = logging.getLogger("meterlex")
 
-TOOLS = ["claude-code", "codex", "antigravity", "ollama", "copilot"]
+TOOLS = ["claude-code", "codex", "antigravity", "gemini-cli", "ollama", "copilot"]
 
 DEFAULT_SETTINGS = {
     "fx_rate": "0.92",
     "sub_claude_code_eur": "21.60",
     "sub_codex_eur": "23.00",
     "sub_antigravity_eur": "18.33",
+    "sub_gemini_cli_eur": "0.00",
     "sub_ollama_eur": "18.18",
     "sub_copilot_eur": "0.00",
 }
+SETTING_KEYS = set(DEFAULT_SETTINGS)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -37,31 +43,16 @@ async def lifespan(app: FastAPI):
         for k, v in DEFAULT_SETTINGS.items():
             if not session.get(Setting, k):
                 session.add(Setting(key=k, value=v))
-        # Migrate GLM/local turns from claude-code → ollama
-        from sqlalchemy import text
-        session.execute(text(
-            "UPDATE usage_turns SET source='ollama' "
-            "WHERE source='claude-code' AND (model_id LIKE 'glm-%' OR model_id LIKE 'local/%')"
-        ))
-        # One-time: earlier Codex ingestion hardcoded every paid turn's
-        # model_id to "gpt-5" instead of reading the real per-turn model
-        # from turn_context.model (gpt-5.4, gpt-5.5, gpt-5.6-sol, etc).
-        # v2: the first fix tracked the model in-memory per scan but didn't
-        # persist it across incremental (60s) scans, so turns ingested
-        # between deploys still got mistagged "gpt-5". Purge again now that
-        # ScanState.last_model carries the model across incremental scans.
-        # Startup always runs a full rescan (offset 0), so this is safe.
-        if not session.get(Setting, "migrated_codex_model_reimport_v2"):
-            session.execute(text("DELETE FROM usage_turns WHERE source='codex'"))
-            session.add(Setting(key="migrated_codex_model_reimport_v2", value="1"))
         session.commit()
-    task = asyncio.create_task(ingest.ingest_loop())
-    log.info("ingest loop started")
+        moved = ingest.reclassify_existing(session)
+        if moved:
+            log.info("moved %d non-Claude Claude Code turns to Ollama", moved)
+    task = asyncio.create_task(ingest.price_loop())
     yield
     task.cancel()
 
 
-app = FastAPI(title="Meterlex API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Meterlex API", version="0.2.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 
@@ -104,7 +95,16 @@ def _period_bounds(period: str, ref: Optional[str]):
     raise HTTPException(400, "period must be monthly, daily, or yearly")
 
 
-# ── health / control ──────────────────────────────────────────────────────────
+def _where(start, end, source: Optional[str] = None, machine: Optional[str] = None) -> list:
+    f = [UsageTurn.ts >= start, UsageTurn.ts < end]
+    if source:
+        f.append(UsageTurn.source == source)
+    if machine:
+        f.append(UsageTurn.machine == machine)
+    return f
+
+
+# ── health / ingest ───────────────────────────────────────────────────────────
 
 @app.get("/api/health")
 def health(session: Session = Depends(get_session)):
@@ -113,17 +113,55 @@ def health(session: Session = Depends(get_session)):
     by_source = session.exec(
         select(UsageTurn.source, func.count(UsageTurn.id)).group_by(UsageTurn.source)
     ).all()
+    by_machine = session.exec(
+        select(UsageTurn.machine, func.count(UsageTurn.id)).group_by(UsageTurn.machine)
+    ).all()
     return {
         "status": "ok",
         "total_turns": total,
         "last_ingested_at": last.isoformat() if last else None,
         "by_source": {s: n for s, n in by_source},
+        "by_machine": {m: n for m, n in by_machine},
     }
 
 
-@app.post("/api/scan")
-def api_scan(full: bool = False):
-    return ingest.trigger_scan(full=full)
+@app.post("/api/ingest")
+def api_ingest(payload: dict, authorization: Optional[str] = Header(None),
+               session: Session = Depends(get_session)):
+    """A collector's batch. The machine is the one its key belongs to."""
+    machine = machines.authenticate(session, authorization)
+    if machine is None:
+        raise HTTPException(401, "unknown or revoked machine key")
+    turns = payload.get("turns")
+    if not isinstance(turns, list):
+        raise HTTPException(400, "turns must be a list")
+    if len(turns) > ingest.MAX_TURNS_PER_BATCH:
+        raise HTTPException(413, f"at most {ingest.MAX_TURNS_PER_BATCH} turns per batch")
+    result = ingest.ingest_turns(session, machine, turns, collector=payload.get("collector"))
+    return {"machine": machine.name, **result}
+
+
+@app.get("/api/machines")
+def list_machines(session: Session = Depends(get_session)):
+    counts = {m: (n, tok) for m, n, tok in session.exec(
+        select(UsageTurn.machine, func.count(UsageTurn.id), func.sum(UsageTurn.total_tokens))
+        .group_by(UsageTurn.machine)
+    ).all()}
+    known = {m.name: m for m in session.exec(select(Machine)).all()}
+    out = []
+    for name in sorted(set(known) | set(counts)):
+        m = known.get(name)
+        n, tok = counts.get(name, (0, 0))
+        out.append({
+            "name": name,
+            "labels": m.labels if m else "full",
+            "registered": m is not None,
+            "revoked": bool(m and m.revoked),
+            "last_seen_at": m.last_seen_at.isoformat() if m and m.last_seen_at else None,
+            "collector_version": m.collector_version if m else None,
+            "turns": int(n), "total_tokens": int(tok or 0),
+        })
+    return out
 
 
 @app.post("/api/recompute")
@@ -137,12 +175,11 @@ def api_recompute():
 def summary(
     period: str = "monthly",
     ref: Optional[str] = None,
+    machine: Optional[str] = None,
     session: Session = Depends(get_session),
 ):
     """Per-tool cost summary + subscription comparison."""
     start, end = _period_bounds(period, ref)
-    base = [UsageTurn.ts >= start, UsageTurn.ts < end]
-
     rows = session.exec(
         select(
             UsageTurn.source,
@@ -151,7 +188,7 @@ def summary(
             func.sum(UsageTurn.input_tokens),
             func.sum(UsageTurn.output_tokens),
             func.sum(UsageTurn.total_tokens),
-        ).where(*base).group_by(UsageTurn.source)
+        ).where(*_where(start, end, machine=machine)).group_by(UsageTurn.source)
     ).all()
 
     year_month = start.strftime("%Y-%m")
@@ -184,7 +221,7 @@ def summary(
     total_cost = sum(d["cost_eur"] for d in data.values())
     total_sub = sum(d["sub_eur"] for d in data.values())
     return {
-        "period": period, "ref": ref,
+        "period": period, "ref": ref, "machine": machine,
         "from": start.isoformat(), "to": end.isoformat(),
         "total_cost_eur": round(total_cost, 4),
         "total_sub_eur": round(total_sub, 4),
@@ -197,6 +234,7 @@ def summary(
 def spend(
     period: str = "monthly",
     source: Optional[str] = None,
+    machine: Optional[str] = None,
     ref: Optional[str] = None,
     frm: Optional[str] = None,
     to: Optional[str] = None,
@@ -208,56 +246,48 @@ def spend(
     else:
         start, end = _period_bounds(period, ref)
 
-    base = [UsageTurn.ts >= start, UsageTurn.ts < end]
-    if source:
-        base.append(UsageTurn.source == source)
+    base = _where(start, end, source, machine)
 
     total_eur = session.exec(select(func.sum(UsageTurn.cost_eur)).where(*base)).one() or 0.0
     total_usd = session.exec(select(func.sum(UsageTurn.cost_usd)).where(*base)).one() or 0.0
     turns = session.exec(select(func.count(UsageTurn.id)).where(*base)).one() or 0
 
-    by_model = session.exec(
-        select(
-            UsageTurn.model_id,
-            func.sum(UsageTurn.cost_eur),
-            func.count(UsageTurn.id),
-            func.sum(UsageTurn.input_tokens),
-            func.sum(UsageTurn.output_tokens),
-            func.sum(UsageTurn.total_tokens),
-        ).where(*base).group_by(UsageTurn.model_id)
-    ).all()
+    def grouped(col):
+        return session.exec(
+            select(
+                col,
+                func.sum(UsageTurn.cost_eur),
+                func.count(UsageTurn.id),
+                func.sum(UsageTurn.input_tokens),
+                func.sum(UsageTurn.output_tokens),
+                func.sum(UsageTurn.total_tokens),
+            ).where(*base).group_by(col)
+        ).all()
 
-    by_project = session.exec(
-        select(
-            UsageTurn.project,
-            func.sum(UsageTurn.cost_eur),
-            func.count(UsageTurn.id),
-        ).where(*base).group_by(UsageTurn.project)
-    ).all()
+    def rows(col, key, empty):
+        return sorted(
+            [{key: v or empty, "cost_eur": round(c or 0, 4), "turns": int(n),
+              "input_tokens": int(inp or 0), "output_tokens": int(out or 0),
+              "total_tokens": int(tok or 0)}
+             for v, c, n, inp, out, tok in grouped(col)],
+            key=lambda x: (-x["cost_eur"], -x["total_tokens"]),
+        )
 
     year_month = start.strftime("%Y-%m")
     sub = pricing.get_sub_eur(session, source, year_month) if source else sum(
         pricing.get_sub_eur(session, t, year_month) for t in TOOLS
     )
     return {
-        "source": source,
+        "source": source, "machine": machine,
         "from": start.isoformat(), "to": end.isoformat(),
         "total_usd": round(total_usd, 4),
         "total_eur": round(total_eur, 4),
         "sub_eur": sub,
         "turns": int(turns),
-        "by_model": sorted(
-            [{"model_id": m, "cost_eur": round(c or 0, 4), "turns": int(n),
-              "input_tokens": int(inp or 0), "output_tokens": int(out or 0),
-              "total_tokens": int(tok or 0)}
-             for m, c, n, inp, out, tok in by_model],
-            key=lambda x: -x["cost_eur"],
-        ),
-        "by_project": sorted(
-            [{"project": p or "(no cwd)", "cost_eur": round(c or 0, 4), "turns": int(n)}
-             for p, c, n in by_project],
-            key=lambda x: -x["cost_eur"],
-        ),
+        "by_model": rows(UsageTurn.model_id, "model_id", "(unknown)"),
+        "by_project": rows(UsageTurn.project, "project", "(no cwd)"),
+        "by_machine": rows(UsageTurn.machine, "machine", "(unknown)"),
+        "by_origin": rows(UsageTurn.origin, "origin", "(unrecorded)"),
     }
 
 
@@ -265,54 +295,48 @@ def spend(
 def spend_timeseries(
     period: str = "monthly",
     source: Optional[str] = None,
+    machine: Optional[str] = None,
     ref: Optional[str] = None,
     session: Session = Depends(get_session),
 ):
     start, end = _period_bounds(period, ref)
     fmt = "%Y-%m" if period == "yearly" else "%Y-%m-%d"
-    base = [UsageTurn.ts >= start, UsageTurn.ts < end]
-    if source:
-        base.append(UsageTurn.source == source)
+    base = _where(start, end, source, machine)
 
     bucket_expr = func.strftime(fmt, UsageTurn.ts)
-    rows = session.exec(
-        select(
-            bucket_expr,
-            UsageTurn.source,
-            func.sum(UsageTurn.cost_eur),
-            func.count(UsageTurn.id),
-            func.sum(UsageTurn.total_tokens),
-        ).where(*base).group_by(bucket_expr, UsageTurn.source)
-    ).all()
 
-    # Per-bucket by-model split (for the "spend by model" chart view).
-    model_rows = session.exec(
-        select(
-            bucket_expr,
-            UsageTurn.model_id,
-            func.sum(UsageTurn.cost_eur),
-            func.sum(UsageTurn.total_tokens),
-        ).where(*base).group_by(bucket_expr, UsageTurn.model_id)
-    ).all()
+    def empty(b):
+        return {"bucket": b, "cost_eur": 0.0, "turns": 0, "by_source": {}, "tokens_by_source": {},
+                "by_model": {}, "tokens_by_model": {}, "tokens_by_machine": {}}
 
-    buckets = {}
-    for b, src, cost, n, tok in rows:
-        entry = buckets.setdefault(b, {"bucket": b, "cost_eur": 0.0, "turns": 0,
-                                       "by_source": {}, "tokens_by_source": {},
-                                       "by_model": {}, "tokens_by_model": {}})
+    buckets: dict = {}
+    for b, src, cost, n, tok in session.exec(
+        select(bucket_expr, UsageTurn.source, func.sum(UsageTurn.cost_eur), func.count(UsageTurn.id),
+               func.sum(UsageTurn.total_tokens)).where(*base).group_by(bucket_expr, UsageTurn.source)
+    ).all():
+        entry = buckets.setdefault(b, empty(b))
         cost = round(cost or 0, 4)
         entry["cost_eur"] = round(entry["cost_eur"] + cost, 4)
         entry["turns"] += int(n)
         entry["by_source"][src] = round(entry["by_source"].get(src, 0) + cost, 4)
         entry["tokens_by_source"][src] = entry["tokens_by_source"].get(src, 0) + int(tok or 0)
 
-    for b, mid, cost, tok in model_rows:
-        entry = buckets.setdefault(b, {"bucket": b, "cost_eur": 0.0, "turns": 0,
-                                       "by_source": {}, "tokens_by_source": {},
-                                       "by_model": {}, "tokens_by_model": {}})
+    # Per-bucket by-model split (for the "spend by model" chart view).
+    for b, mid, cost, tok in session.exec(
+        select(bucket_expr, UsageTurn.model_id, func.sum(UsageTurn.cost_eur), func.sum(UsageTurn.total_tokens))
+        .where(*base).group_by(bucket_expr, UsageTurn.model_id)
+    ).all():
+        entry = buckets.setdefault(b, empty(b))
         mid = mid or "(unknown)"
         entry["by_model"][mid] = round(entry["by_model"].get(mid, 0) + (cost or 0), 4)
         entry["tokens_by_model"][mid] = entry["tokens_by_model"].get(mid, 0) + int(tok or 0)
+
+    for b, mach, tok in session.exec(
+        select(bucket_expr, UsageTurn.machine, func.sum(UsageTurn.total_tokens))
+        .where(*base).group_by(bucket_expr, UsageTurn.machine)
+    ).all():
+        entry = buckets.setdefault(b, empty(b))
+        entry["tokens_by_machine"][mach] = int(tok or 0)
 
     return [buckets[k] for k in sorted(buckets)]
 
@@ -351,24 +375,16 @@ async def mirror_pull_prices(session: Session = Depends(get_session)):
 
 @app.get("/api/settings")
 def get_settings(session: Session = Depends(get_session)):
-    return {
-        "fx_rate": pricing.get_fx_rate(session),
-        "sub_claude_code_eur": pricing.get_sub_eur(session, "claude-code"),
-        "sub_codex_eur": pricing.get_sub_eur(session, "codex"),
-        "sub_antigravity_eur": pricing.get_sub_eur(session, "antigravity"),
-        "sub_ollama_eur": pricing.get_sub_eur(session, "ollama"),
-        "sub_copilot_eur": pricing.get_sub_eur(session, "copilot"),
-    }
+    out = {"fx_rate": pricing.get_fx_rate(session)}
+    for key in sorted(SETTING_KEYS - {"fx_rate"}):
+        out[key] = pricing.get_sub_eur(session, key[len("sub_"):-len("_eur")])
+    return out
 
 
 @app.patch("/api/settings")
 def update_settings(payload: dict, session: Session = Depends(get_session)):
-    allowed = {
-        "fx_rate", "sub_claude_code_eur", "sub_codex_eur",
-        "sub_antigravity_eur", "sub_ollama_eur", "sub_copilot_eur",
-    }
     for k, v in payload.items():
-        if k in allowed:
+        if k in SETTING_KEYS:
             row = session.get(Setting, k) or Setting(key=k)
             row.value = str(v)
             session.add(row)
