@@ -1,0 +1,126 @@
+import {
+  Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis, Area, AreaChart,
+} from "recharts";
+import type { Bucket, TokenSplit } from "../api";
+import { bucketFull, bucketLabel, fmtEur, fmtInt, fmtTok, harness, pct, SPLIT } from "../lib";
+
+/* Recharts writes the tick colour as an SVG attribute, which the stylesheet
+   cannot override — so the axes carry it as a prop. */
+const TICK = { fill: "var(--ink-3)", fontFamily: "var(--mono)", fontSize: 10 };
+
+/* Forms follow DESIGN.md → Charts. Tokens per bucket is ONE series: the harness
+   split lives in the tooltip, because a six-colour stack fails CVD separation
+   and answers a question that does not need colour. */
+
+export function DayBars({ series, period }: { series: Bucket[]; period: string }) {
+  const data = series.map((b) => ({ ...b, label: bucketLabel(b.bucket) }));
+  const peak = Math.max(...data.map((d) => d.tokens), 0);
+  return (
+    <div style={{ height: 210, margin: "4px -6px 0" }}>
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={data} margin={{ top: 8, right: 6, bottom: 0, left: 6 }} barCategoryGap={period === "yearly" ? 6 : 3}>
+          <CartesianGrid vertical={false} />
+          <XAxis dataKey="label" tickLine={false} axisLine={false} interval="preserveStartEnd" minTickGap={14}
+                 tick={TICK} />
+          <YAxis width={56} tickLine={false} axisLine={false} tickFormatter={(v: number) => fmtTok(v)}
+                 tick={TICK} />
+          <Tooltip cursor={{ fill: "var(--surface-2)" }} content={<BucketTip />} />
+          <Bar dataKey="tokens" isAnimationActive={false}>
+            {data.map((d) => (
+              /* The busiest bucket is the only one that changes weight: it is
+                 the answer to "when did this happen", not a second series. */
+              <Cell key={d.bucket} fill={d.tokens === peak && peak > 0 ? "var(--ink)" : "var(--ink-3)"} />
+            ))}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+function BucketTip({ active, payload }: any) {
+  if (!active || !payload?.length) return null;
+  const b: Bucket = payload[0].payload;
+  const rows = Object.entries(b.by_source).sort((a, c) => c[1] - a[1]);
+  return (
+    <div className="tip">
+      <div className="tip-head">{bucketFull(b.bucket)}</div>
+      <div className="tip-row">{fmtInt(b.tokens)} tokens <span>{fmtEur(b.cost_eur)}</span></div>
+      <div className="tip-row" style={{ color: "var(--ink-3)" }}>{fmtInt(b.turns)} replies</div>
+      {rows.length > 0 && <div style={{ borderTop: "1px solid var(--rule)", margin: "6px 0 5px" }} />}
+      {rows.map(([src, tok]) => (
+        <div className="tip-row" key={src}>
+          <span style={{ marginLeft: 0, display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <i className="dot" style={{ background: harness(src).fill }} /> {harness(src).label}
+          </span>
+          <span>{fmtTok(tok)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Shape, not measurement: no axes, no colour, no grid. */
+export function Sparkline({ series, machine }: { series: Bucket[]; machine: string }) {
+  const data = series.map((b) => ({ x: b.bucket, v: b.by_machine[machine] ?? 0 }));
+  if (!data.some((d) => d.v > 0)) return <div style={{ height: 34 }} />;
+  return (
+    <div style={{ height: 34 }} aria-hidden="true">
+      <ResponsiveContainer width="100%" height="100%">
+        <AreaChart data={data} margin={{ top: 2, right: 0, bottom: 0, left: 0 }}>
+          <Area type="monotone" dataKey="v" stroke="var(--ink-2)" strokeWidth={1.5}
+                fill="var(--surface-2)" isAnimationActive={false} dot={false} />
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+/** Parts of one whole: a single 100% bar in one sequential ramp, 2px gaps. */
+export function SplitBar({ split, total }: { split: TokenSplit; total: number }) {
+  const parts = SPLIT.map((s) => ({ ...s, value: split[s.key] ?? 0 })).filter((s) => s.value > 0);
+  if (!parts.length || total <= 0) return <div className="empty">No tokens in this period.</div>;
+  return (
+    <>
+      <div className="split" role="img"
+           aria-label={parts.map((p) => `${p.label} ${pct(p.value, total).toFixed(0)}%`).join(", ")}>
+        {parts.map((p) => (
+          <div className="split-seg" key={p.key}
+               style={{ background: p.fill, width: `${pct(p.value, total)}%` }} title={`${p.label}: ${fmtInt(p.value)}`} />
+        ))}
+      </div>
+      <ul className="split-legend">
+        {parts.map((p) => (
+          <li key={p.key} title={p.hint}>
+            <i className="swatch" style={{ background: p.fill }} />
+            {p.label} <b>{pct(p.value, total).toFixed(0)}%</b> <span>{fmtTok(p.value)}</span>
+          </li>
+        ))}
+      </ul>
+    </>
+  );
+}
+
+/** A ranked list. The bar is the comparison; the colour is identity only. */
+export function RankRows({ rows }: {
+  rows: { key: string; name: React.ReactNode; value: string; sub?: string; share: number; fill: string; onClick?: () => void }[];
+}) {
+  if (!rows.length) return <div className="empty">Nothing recorded in this period.</div>;
+  return (
+    <div className="rank">
+      {rows.map((r) => {
+        const Row = r.onClick ? "button" : "div";
+        return (
+          <Row className="rank-row" key={r.key} onClick={r.onClick} type={r.onClick ? "button" : undefined}>
+            <div className="rank-name"><i className="dot" style={{ background: r.fill }} />{r.name}</div>
+            <div style={{ textAlign: "right" }}>
+              <div className="rank-value">{r.value}</div>
+              {r.sub && <div className="rank-sub">{r.sub}</div>}
+            </div>
+            <div className="rank-bar"><i style={{ width: `${Math.max(1.5, r.share)}%`, background: r.fill }} /></div>
+          </Row>
+        );
+      })}
+    </div>
+  );
+}

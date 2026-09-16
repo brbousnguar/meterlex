@@ -6,9 +6,11 @@ Ports: API 8692, UI 5180 (both bound to 127.0.0.1; reach the UI over Tailscale).
 """
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
+from zoneinfo import ZoneInfo
 from fastapi import FastAPI, Depends, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Session, select, func
@@ -23,6 +25,10 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelna
 log = logging.getLogger("meterlex")
 
 TOOLS = ["claude-code", "codex", "antigravity", "gemini-cli", "ollama", "copilot"]
+
+# Periods are named in the user's own time, not UTC: a "week" that starts at
+# 02:00 Paris on Monday reads as wrong to the person looking at it.
+LOCAL_TZ = ZoneInfo(os.getenv("LOCAL_TZ", "Europe/Paris"))
 
 DEFAULT_SETTINGS = {
     "fx_rate": "0.92",
@@ -67,9 +73,38 @@ def _parse_date(s: Optional[str]) -> Optional[datetime]:
         raise HTTPException(400, f"bad date '{s}' (use YYYY-MM-DD)")
 
 
+def _local_now() -> datetime:
+    """Wall-clock time where the user is, naive, for period arithmetic."""
+    return datetime.now(LOCAL_TZ).replace(tzinfo=None)
+
+
+def _to_utc(local: datetime) -> datetime:
+    """A naive local wall-clock time as the naive UTC that rows are stored in."""
+    return local.replace(tzinfo=LOCAL_TZ).astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def _from_utc(utc: datetime) -> datetime:
+    """The inverse: naive stored UTC as naive local wall-clock time."""
+    return utc.replace(tzinfo=timezone.utc).astimezone(LOCAL_TZ).replace(tzinfo=None)
+
+
+def _midnight(d: datetime) -> datetime:
+    return d.replace(hour=0, minute=0, second=0, microsecond=0)
+
+
 def _period_bounds(period: str, ref: Optional[str]):
-    now = datetime.utcnow()
-    if period == "monthly":
+    """(start, end) in UTC for a period named in local time.
+
+    Periods are local: a week starts Monday 00:00 in LOCAL_TZ and a month at
+    local midnight, so "this week" does not change at 02:00 the way UTC bounds
+    did. Rows are stored as naive UTC, so both ends come back converted.
+    """
+    now = _local_now()
+    if period == "weekly":
+        day = _parse_date(ref) if ref else now          # any day inside the week
+        start = _midnight(day) - timedelta(days=day.weekday())
+        end = start + timedelta(days=7)
+    elif period == "monthly":
         if ref:
             try:
                 y, m = map(int, ref.split("-"))
@@ -77,22 +112,37 @@ def _period_bounds(period: str, ref: Optional[str]):
             except (TypeError, ValueError):
                 raise HTTPException(400, "monthly ref must use YYYY-MM")
         else:
-            start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            start = _midnight(now).replace(day=1)
         end = start.replace(month=start.month % 12 + 1) if start.month < 12 \
             else start.replace(year=start.year + 1, month=1)
-        return start, end
     elif period == "daily":
         if ref:
-            start = _parse_date(ref)
-            return start, start + timedelta(days=1)
-        return now - timedelta(days=30), now
+            start = _midnight(_parse_date(ref))
+            end = start + timedelta(days=1)
+        else:
+            start, end = now - timedelta(days=30), now
     elif period == "yearly":
         try:
             y = int(ref) if ref else now.year
         except (TypeError, ValueError):
             raise HTTPException(400, "yearly ref must use YYYY")
-        return datetime(y, 1, 1), datetime(y + 1, 1, 1)
-    raise HTTPException(400, "period must be monthly, daily, or yearly")
+        start, end = datetime(y, 1, 1), datetime(y + 1, 1, 1)
+    else:
+        raise HTTPException(400, "period must be weekly, monthly, daily, or yearly")
+    return _to_utc(start), _to_utc(end)
+
+
+def _previous_bounds(period: str, start_utc: datetime):
+    """The same-length period before `start_utc`, for "vs last week" figures."""
+    start = _from_utc(start_utc)
+    if period == "weekly":
+        return _period_bounds("weekly", (start - timedelta(days=7)).strftime("%Y-%m-%d"))
+    if period == "monthly":
+        prev = start.replace(day=1) - timedelta(days=1)
+        return _period_bounds("monthly", prev.strftime("%Y-%m"))
+    if period == "yearly":
+        return _period_bounds("yearly", str(start.year - 1))
+    return None, None
 
 
 def _where(start, end, source: Optional[str] = None, machine: Optional[str] = None) -> list:
@@ -139,6 +189,17 @@ def api_ingest(payload: dict, authorization: Optional[str] = Header(None),
         raise HTTPException(413, f"at most {ingest.MAX_TURNS_PER_BATCH} turns per batch")
     result = ingest.ingest_turns(session, machine, turns, collector=payload.get("collector"))
     return {"machine": machine.name, **result}
+
+
+@app.get("/api/config")
+def config():
+    """What the UI needs to know about this deployment. The rate card lives in
+    its own app; its address is per-machine, so it is configuration, not code."""
+    return {
+        "prices_url": os.getenv("PRICES_URL", ""),
+        "tz": str(LOCAL_TZ),
+        "hub_machine": os.getenv("HUB_MACHINE", ""),
+    }
 
 
 @app.get("/api/machines")
@@ -339,6 +400,196 @@ def spend_timeseries(
         entry["tokens_by_machine"][mach] = int(tok or 0)
 
     return [buckets[k] for k in sorted(buckets)]
+
+
+# ── overview ──────────────────────────────────────────────────────────────────
+
+_TOKEN_COLS = ("input_tokens", "output_tokens", "cache_read", "cache_write", "reasoning_tokens")
+
+
+def _bucket_key(hour_utc: str, period: str) -> str:
+    """The local day (or month, over a year) an hour of UTC belongs to."""
+    local = _from_utc(datetime.strptime(hour_utc, "%Y-%m-%d %H"))
+    return local.strftime("%Y-%m" if period == "yearly" else "%Y-%m-%d")
+
+
+def _buckets_for(period: str, start_utc: datetime, end_utc: datetime) -> list:
+    """Every bucket in the period, including the empty ones, so a quiet day
+    shows as a gap in the chart instead of disappearing."""
+    start, end = _from_utc(start_utc), _from_utc(end_utc)
+    out, cur = [], start
+    if period == "yearly":
+        cur = start.replace(day=1)
+        while cur < end:
+            out.append(cur.strftime("%Y-%m"))
+            cur = cur.replace(year=cur.year + 1, month=1) if cur.month == 12 \
+                else cur.replace(month=cur.month + 1)
+    else:
+        cur = _midnight(start)
+        while cur < end:
+            out.append(cur.strftime("%Y-%m-%d"))
+            cur += timedelta(days=1)
+    return out
+
+
+@app.get("/api/overview")
+def overview(
+    period: str = "weekly",
+    ref: Optional[str] = None,
+    machine: Optional[str] = None,
+    source: Optional[str] = None,
+    session: Session = Depends(get_session),
+):
+    """Everything one screen needs for a period: the reading, who burned it,
+    through which harness and on which model, and how it compares with the
+    period before. Periods are local (see _period_bounds)."""
+    start, end = _period_bounds(period, ref)
+    base = _where(start, end, source, machine)
+    days = max((end - start).total_seconds() / 86400, 1e-9)
+
+    def totals_for(filters) -> dict:
+        row = session.exec(
+            select(
+                func.count(UsageTurn.id),
+                func.sum(UsageTurn.total_tokens),
+                func.sum(UsageTurn.cost_eur),
+                func.sum(UsageTurn.cost_usd),
+                *[func.sum(getattr(UsageTurn, c)) for c in _TOKEN_COLS],
+                func.count(func.distinct(UsageTurn.session_id)),
+                func.count(func.distinct(UsageTurn.model_id)),
+                func.count(func.distinct(UsageTurn.machine)),
+            ).where(*filters)
+        ).one()
+        turns, tok, eur, usd = row[0], row[1], row[2], row[3]
+        split = dict(zip(_TOKEN_COLS, (int(v or 0) for v in row[4:4 + len(_TOKEN_COLS)])))
+        return {
+            "turns": int(turns or 0),
+            "tokens": int(tok or 0),
+            "cost_eur": round(eur or 0, 4),
+            "cost_usd": round(usd or 0, 4),
+            **split,
+            "sessions": int(row[-3] or 0),
+            "models": int(row[-2] or 0),
+            "machines": int(row[-1] or 0),
+        }
+
+    totals = totals_for(base)
+
+    # Subscriptions are billed monthly; a week's share is pro-rated by days so
+    # "paid" can be compared with "list price" over any period.
+    year_month = _from_utc(start).strftime("%Y-%m")
+    month_fee = {t: pricing.get_sub_eur(session, t, year_month) for t in TOOLS}
+    fee_factor = days / 30.4375
+    sub_for = lambda t: round(month_fee.get(t, 0.0) * fee_factor, 2)
+    totals["sub_eur"] = round(sum(sub_for(t) for t in (TOOLS if not source else [source])), 2)
+    totals["sub_eur_month"] = round(sum(month_fee[t] for t in (TOOLS if not source else [source])), 2)
+
+    prev_start, prev_end = _previous_bounds(period, start)
+    previous = None
+    if prev_start:
+        previous = totals_for(_where(prev_start, prev_end, source, machine))
+        previous["from"], previous["to"] = prev_start.isoformat(), prev_end.isoformat()
+
+    def group(col, key, empty, extra=None):
+        rows = session.exec(
+            select(
+                col,
+                func.count(UsageTurn.id),
+                func.sum(UsageTurn.total_tokens),
+                func.sum(UsageTurn.cost_eur),
+                *[func.sum(getattr(UsageTurn, c)) for c in _TOKEN_COLS],
+                func.count(func.distinct(UsageTurn.model_id)),
+            ).where(*base).group_by(col)
+        ).all()
+        out = []
+        for r in rows:
+            item = {
+                key: r[0] or empty,
+                "turns": int(r[1] or 0),
+                "tokens": int(r[2] or 0),
+                "cost_eur": round(r[3] or 0, 4),
+                **dict(zip(_TOKEN_COLS, (int(v or 0) for v in r[4:4 + len(_TOKEN_COLS)]))),
+                "models": int(r[-1] or 0),
+            }
+            if extra:
+                extra(item)
+            out.append(item)
+        return sorted(out, key=lambda x: -x["tokens"])
+
+    def with_sub(item):
+        item["sub_eur"] = sub_for(item["source"])
+        item["sub_eur_month"] = month_fee.get(item["source"], 0.0)
+
+    by_source = group(UsageTurn.source, "source", "(unknown)", with_sub)
+    for tool in TOOLS:                       # a harness with no usage still has a fee
+        if source in (None, tool) and not any(r["source"] == tool for r in by_source):
+            by_source.append({"source": tool, "turns": 0, "tokens": 0, "cost_eur": 0.0,
+                              **{c: 0 for c in _TOKEN_COLS}, "models": 0,
+                              "sub_eur": sub_for(tool), "sub_eur_month": month_fee.get(tool, 0.0)})
+
+    machines_seen = {m.name: m for m in session.exec(select(Machine)).all()}
+
+    def with_machine_meta(item):
+        m = machines_seen.get(item["machine"])
+        item["last_seen_at"] = m.last_seen_at.isoformat() if m and m.last_seen_at else None
+        item["registered"] = bool(m)
+
+    by_machine = group(UsageTurn.machine, "machine", "(unknown)", with_machine_meta)
+    for name, m in machines_seen.items():    # registered but silent this period
+        if not any(r["machine"] == name for r in by_machine):
+            by_machine.append({"machine": name, "turns": 0, "tokens": 0, "cost_eur": 0.0,
+                               **{c: 0 for c in _TOKEN_COLS}, "models": 0, "registered": True,
+                               "last_seen_at": m.last_seen_at.isoformat() if m.last_seen_at else None})
+
+    by_model = group(UsageTurn.model_id, "model_id", "(unknown)")[:14]
+    by_project = group(UsageTurn.project, "project", "(no folder)")[:10]
+    by_origin = group(UsageTurn.origin, "origin", "(unrecorded)")
+
+    # Which harness each model ran under, so a model row can carry its colour.
+    model_source = dict(session.exec(
+        select(UsageTurn.model_id, func.min(UsageTurn.source)).where(*base).group_by(UsageTurn.model_id)
+    ).all())
+    for row in by_model:
+        row["source"] = model_source.get(row["model_id"], "(unknown)")
+
+    # Series, bucketed by local day (month over a year).
+    hour = func.strftime("%Y-%m-%d %H", UsageTurn.ts)
+    series = {b: {"bucket": b, "tokens": 0, "turns": 0, "cost_eur": 0.0,
+                  "by_source": {}, "by_machine": {}}
+              for b in _buckets_for(period, start, end)}
+    for h, src, mach, n, tok, eur in session.exec(
+        select(hour, UsageTurn.source, UsageTurn.machine, func.count(UsageTurn.id),
+               func.sum(UsageTurn.total_tokens), func.sum(UsageTurn.cost_eur))
+        .where(*base).group_by(hour, UsageTurn.source, UsageTurn.machine)
+    ).all():
+        b = _bucket_key(h, period)
+        e = series.get(b)
+        if e is None:                        # a row on the boundary of a DST shift
+            continue
+        tok, n = int(tok or 0), int(n or 0)
+        e["tokens"] += tok
+        e["turns"] += n
+        e["cost_eur"] = round(e["cost_eur"] + (eur or 0), 4)
+        e["by_source"][src] = e["by_source"].get(src, 0) + tok
+        e["by_machine"][mach] = e["by_machine"].get(mach, 0) + tok
+    series = [series[b] for b in sorted(series)]
+    busiest = max(series, key=lambda b: b["tokens"], default=None)
+
+    return {
+        "period": period, "ref": ref, "machine": machine, "source": source,
+        "tz": str(LOCAL_TZ),
+        "from": start.isoformat(), "to": end.isoformat(),
+        "from_local": _from_utc(start).isoformat(), "to_local": _from_utc(end).isoformat(),
+        "totals": totals,
+        "previous": previous,
+        "by_source": by_source,
+        "by_machine": by_machine,
+        "by_model": by_model,
+        "by_project": by_project,
+        "by_origin": by_origin,
+        "series": series,
+        "busiest": busiest if busiest and busiest["tokens"] else None,
+    }
 
 
 # ── prices ────────────────────────────────────────────────────────────────────

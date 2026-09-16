@@ -1,12 +1,16 @@
 url: http://localhost:5180
 ---
 - launchApp
+- assertVisible: "List price"
 - tapOn:
-    css: '[data-testid="nav-codex"]'
-- assertVisible: "Codex"
+    css: '[data-testid="tab-machines"]'
+- assertVisible: "Meters"
 - tapOn:
-    css: '[data-testid="nav-dashboard"]'
-- assertVisible: "Spend dashboard"
+    css: '[data-testid="tab-harnesses"]'
+- assertVisible: "Claude Code"
 - tapOn:
-    css: '[data-testid="nav-prices"]'
-- assertVisible: "Prices & settings"
+    css: '[data-testid="tab-models"]'
+- assertVisible: "Every model this period"
+- tapOn:
+    css: '[data-testid="tab-now"]'
+- assertVisible: "Tokens by day"

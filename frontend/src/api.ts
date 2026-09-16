@@ -116,6 +116,86 @@ export interface ManualBill {
   amount_eur: number;
 }
 
+export interface TokenSplit {
+  input_tokens: number;
+  output_tokens: number;
+  cache_read: number;
+  cache_write: number;
+  reasoning_tokens: number;
+}
+
+export interface Totals extends TokenSplit {
+  turns: number;
+  tokens: number;
+  cost_eur: number;
+  cost_usd: number;
+  sessions: number;
+  models: number;
+  machines: number;
+  sub_eur: number;
+  sub_eur_month: number;
+}
+
+export interface GroupRow extends TokenSplit {
+  turns: number;
+  tokens: number;
+  cost_eur: number;
+  models: number;
+}
+
+export type SourceRow  = GroupRow & { source: string; sub_eur: number; sub_eur_month: number };
+export type MachineRow = GroupRow & { machine: string; last_seen_at: string | null; registered: boolean };
+export type ModelRowX  = GroupRow & { model_id: string; source: string };
+export type ProjectRowX = GroupRow & { project: string };
+export type OriginRow  = GroupRow & { origin: string };
+
+export interface Bucket {
+  bucket: string;
+  tokens: number;
+  turns: number;
+  cost_eur: number;
+  by_source: Record<string, number>;
+  by_machine: Record<string, number>;
+}
+
+export interface Overview {
+  period: Period;
+  ref: string | null;
+  machine: string | null;
+  source: string | null;
+  tz: string;
+  from: string; to: string;
+  from_local: string; to_local: string;
+  totals: Totals;
+  previous: (Totals & { from: string; to: string }) | null;
+  by_source: SourceRow[];
+  by_machine: MachineRow[];
+  by_model: ModelRowX[];
+  by_project: ProjectRowX[];
+  by_origin: OriginRow[];
+  series: Bucket[];
+  busiest: Bucket | null;
+}
+
+export type Period = "weekly" | "monthly" | "yearly";
+
+export interface MachineInfo {
+  name: string;
+  labels: string;
+  registered: boolean;
+  revoked: boolean;
+  last_seen_at: string | null;
+  collector_version: string | null;
+  turns: number;
+  total_tokens: number;
+}
+
+export interface Config {
+  prices_url: string;
+  tz: string;
+  hub_machine: string;
+}
+
 export interface Health {
   status: string;
   total_turns: number;
@@ -125,6 +205,11 @@ export interface Health {
 
 export const api = {
   health: () => get<Health>("/api/health"),
+  overview: (period: Period, ref?: string | null, machine?: string | null) =>
+    get<Overview>(`/api/overview?period=${period}${ref ? `&ref=${encodeURIComponent(ref)}` : ""}` +
+      `${machine ? `&machine=${encodeURIComponent(machine)}` : ""}`),
+  machines: () => get<MachineInfo[]>("/api/machines"),
+  config: () => get<Config>("/api/config"),
   summary: (q: string) => get<Summary>(`/api/summary${q}`),
   spend: (q: string) => get<SpendResp>(`/api/spend${q}`),
   timeseries: (q: string) => get<TsBucket[]>(`/api/spend/timeseries${q}`),

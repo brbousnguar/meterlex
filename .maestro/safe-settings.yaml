@@ -2,9 +2,10 @@ url: http://localhost:5180
 ---
 - launchApp
 - tapOn:
-    css: '[data-testid="nav-prices"]'
-- assertVisible: "Exchange rate"
-- assertVisible: "Subscription"
+    css: '[data-testid="tab-more"]'
+- assertVisible: "What you pay"
+- assertVisible: "Dollar to euro"
+- assertVisible: "Collectors"
 - tapOn:
-    css: '[data-testid="nav-dashboard"]'
-- assertVisible: "Spend dashboard"
+    css: '[data-testid="tab-now"]'
+- assertVisible: "List price"

@@ -2,14 +2,29 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <link rel="icon" href="/favicon.ico?v=2" sizes="48x48 32x32 16x16" />
-    <link rel="icon" type="image/svg+xml" href="/brand-mark.svg" sizes="any" />
-    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>Meterlex</title>
+    <meta name="description" content="What your coding agents burn: tokens, models, harnesses and machines." />
+
+    <link rel="icon" href="/favicon.ico?v=1" sizes="48x48 32x32 16x16" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=1" sizes="any" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=1" />
+    <link rel="manifest" href="/site.webmanifest?v=1" />
+
+    <!-- The installed app keeps the system status bar: "black-translucent"
+         leaves a dead band under a bottom tab bar on iOS. -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Meterlex" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#fbfaf6" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#131519" />
+    <meta name="color-scheme" content="light dark" />
+
+    <!-- Type: Archivo (display, every number), Hanken Grotesk (reading),
+         IBM Plex Mono (machine names and model ids). See DESIGN.md. -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Hanken+Grotesk:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" />
   </head>
   <body>
     <div id="root"></div>

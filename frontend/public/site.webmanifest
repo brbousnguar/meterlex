@@ -1,0 +1,17 @@
+{
+  "name": "Meterlex",
+  "short_name": "Meterlex",
+  "description": "What your coding agents burn: tokens, models, harnesses and machines.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#fbfaf6",
+  "theme_color": "#b4441f",
+  "icons": [
+    { "src": "/favicon.svg?v=1", "type": "image/svg+xml", "sizes": "any", "purpose": "any" },
+    { "src": "/icon-192.png?v=1", "type": "image/png", "sizes": "192x192" },
+    { "src": "/icon-512.png?v=1", "type": "image/png", "sizes": "512x512", "purpose": "any maskable" },
+    { "src": "/apple-touch-icon.png?v=1", "type": "image/png", "sizes": "180x180" }
+  ]
+}
