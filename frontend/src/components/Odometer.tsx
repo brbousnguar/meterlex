@@ -1,0 +1,56 @@
+import { useEffect, useRef, useState } from "react";
+
+/** The reading, drawn like the drum of a gas meter: one digit per cell,
+ *  hairline-separated, thin gaps every three digits. Leading zeros are kept —
+ *  a meter has a fixed number of drums — but drawn in the muted ink so the
+ *  significant digits still read first. */
+export default function Odometer({
+  value, unit, digits = 0, small = false,
+}: { value: number; unit?: string; digits?: number; small?: boolean }) {
+  const shown = useCount(value);
+  const text = String(Math.max(0, Math.round(shown)));
+  const padded = digits > text.length ? text.padStart(digits, "0") : text;
+  const lead = padded.length - text.length;
+
+  const cells: React.ReactNode[] = [];
+  padded.split("").forEach((ch, i) => {
+    const fromEnd = padded.length - i;
+    if (i > 0 && fromEnd % 3 === 0) cells.push(<i className="odo-gap" key={`g${i}`} />);
+    cells.push(
+      <span className="odo-cell" data-lead={i < lead ? "true" : "false"} key={i}
+            style={small ? { fontSize: "1.3rem", padding: "1px 4px 2px" } : undefined}>
+        {ch}
+      </span>,
+    );
+  });
+
+  const drums = padded.length;
+  return (
+    <div className="odo" role="img" style={{ ["--drums" as any]: drums }} aria-label={`${value.toLocaleString("fr-FR")}${unit ? ` ${unit}` : ""}`}>
+      {cells}
+      {unit && <span className="odo-unit" aria-hidden="true">{unit}</span>}
+    </div>
+  );
+}
+
+/** Counts up to the value once, the way a meter catches up — and skips the
+ *  animation entirely when the reader asked for less motion. */
+function useCount(target: number) {
+  const [n, setN] = useState(target);
+  const from = useRef(target);
+  useEffect(() => {
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduced || Math.abs(target - from.current) < 2) { from.current = target; setN(target); return; }
+    const start = performance.now(), a = from.current, span = 620;
+    let raf = 0;
+    const tick = (t: number) => {
+      const p = Math.min(1, (t - start) / span);
+      const eased = 1 - Math.pow(1 - p, 3);
+      setN(a + (target - a) * eased);
+      if (p < 1) raf = requestAnimationFrame(tick); else from.current = target;
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [target]);
+  return n;
+}

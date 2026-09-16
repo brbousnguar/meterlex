@@ -51,7 +51,7 @@ def test_monthly_summary_includes_usage_and_zero_filled_tools(client, engine):
 
 
 def test_summary_rejects_invalid_period_and_month(client):
-    assert client.get("/api/summary", params={"period": "weekly"}).status_code == 400
+    assert client.get("/api/summary", params={"period": "hourly"}).status_code == 400
     assert client.get("/api/summary", params={"period": "monthly", "ref": "bad"}).status_code in {400, 422}
 
 

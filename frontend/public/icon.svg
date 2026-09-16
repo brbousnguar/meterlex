@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Meterlex">
+  <!-- Meter Room: a dial reading two thirds of full scale, drawn flat on paper.
+       Everything sits inside the maskable safe circle (r=205 at 256,256). -->
+  <rect width="512" height="512" fill="#FBFAF6"/>
+  <!-- full scale -->
+  <path d="M 153 379 A 146 146 0 1 1 359 379" fill="none" stroke="#D8D4C8" stroke-width="40"/>
+  <!-- the reading -->
+  <path d="M 153 379 A 146 146 0 1 1 334 153" fill="none" stroke="#B4441F" stroke-width="40"/>
+  <!-- needle and hub -->
+  <path d="M 256 276 L 323 170" stroke="#151512" stroke-width="24"/>
+  <circle cx="256" cy="276" r="26" fill="#151512"/>
+  <!-- one odometer drum, the other half of the system -->
+  <rect x="196" y="398" width="120" height="14" fill="#151512"/>
+</svg>

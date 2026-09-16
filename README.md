@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="frontend/public/brand-mark.svg" width="88" alt="Meterlex mark" />
+  <img src="frontend/public/icon.svg" width="88" alt="Meterlex mark" />
 </p>
 
 <h1 align="center">Meterlex</h1>
@@ -42,6 +42,22 @@ host; transcripts never leave the machine that wrote them.
 - **Copilot CLI** — per-session, per-model token totals from `~/.copilot/session-state/*/events.jsonl` (older CLIs: `~/.copilot/data.db`), priced at each model's rate. In-editor Copilot usage is not exposed locally and is not counted. Variable subscription charges can be entered as monthly bills in Prices & settings.
 - **Machines** — every turn records the machine it came from, and each machine's projects are stored as a full path, a folder name or a hash, as you choose per machine.
 
+### What the app shows
+
+Four readings and a settings screen, over **this week (Monday start), this month
+or this year** — periods counted in your own time zone, never UTC:
+
+- **Now** — the reading itself: tokens as an odometer, list price against what the
+  subscriptions actually cost over that period, how much the subscriptions earn,
+  the share replayed from cache, tokens per day, and where the work happened.
+- **Machines** — one meter per machine: its reading, its share, the shape of its
+  period, when its collector last reported, and which machines went silent.
+- **Harnesses** — per tool: tokens, replies, models, list price against its fee,
+  and the token split.
+- **Models** — every model in the period, ranked, with the harness that ran it.
+- **More** — subscriptions and FX, the collectors and their last report, and a
+  link to the rate card, which lives in its own app.
+
 Costs are computed as `(input × prompt_rate + output × completion_rate + cache_read × cache_read_rate + cache_write × cache_write_rate) × fx_rate`. Savings are `API cost − subscription` — positive means the subscription wins.
 
 ## Quick start
@@ -80,6 +96,8 @@ Docker Compose automatically reads `.env` from the repository root.
 | Variable | Purpose |
 | --- | --- |
 | `HUB_MACHINE` | The machine name for history stored before collectors reported per machine: use the name the hub machine's own collector reports under |
+| `LOCAL_TZ` | The zone periods are counted in (default `Europe/Paris`). A week starts Monday 00:00 there and a day at local midnight; rows stay stored in UTC |
+| `PRICES_URL` | Where the model-prices app is reachable from a browser. The Prices link on the More screen points there; leave empty to hide it |
 
 The hub reads no session logs itself: every machine, the hub's own included,
 runs the collector. To reach the hub from other machines, keep it off the
@@ -255,6 +273,8 @@ paths.
 | `GET` | `/api/health` | Status, total turns, last ingest timestamp, turns per tool and per machine |
 | `POST` | `/api/ingest` | A collector's batch (`Authorization: Bearer <machine key>`); returns inserted / updated / folded / rejected |
 | `GET` | `/api/machines` | Each machine: label policy, last report, collector version, turns and tokens |
+| `GET` | `/api/config` | What the UI needs about this deployment: the rate card's address and the period time zone |
+| `GET` | `/api/overview` | Everything one screen needs for a period (`?period=weekly\|monthly\|yearly`, `?ref=`, `?machine=`, `?source=`): totals with the token split, the same-length period before, by machine, harness, model, project and origin, and a bucketed series with the empty buckets kept |
 | `GET` | `/api/summary` | Per-tool cost summary with subscription comparison (`?machine=` filters) |
 | `GET` | `/api/spend` | Aggregated spend for a period, by model, project, machine and origin (`?source=`, `?machine=`) |
 | `GET` | `/api/spend/timeseries` | Bucketed series (daily / monthly / yearly) with per-source, per-model and per-machine splits |
@@ -271,18 +291,36 @@ The rate card itself lives in [model-prices](https://github.com/brbousnguar/mode
 
 ## Visual identity
 
-The mark is a terminal chevron and cursor alongside rising spend bars inside a rounded chip. The chevron references the coding-tool context; the ascending bars are the cost trend; the dashed line connects their peaks.
+**Meter Room** — the full system, with every measured value, is in
+[`DESIGN.md`](DESIGN.md); that file and `frontend/src/index.css` change together.
+The short version: the app is a meter, so the number is the design. Flat,
+hard-edged, separated by hairlines, with an odometer for the reading and one
+meter card per machine.
 
-| Role | Color | Use |
+Colour means exactly two things. **Harness identity** — one measured swatch per
+tool, Codex deliberately the neutral one — and **direction**, whether the list
+price sits above or below what the subscriptions cost. Machines and models carry
+no colour; they are ranked by the number.
+
+| Role | Colour | Use |
 | --- | --- | --- |
-| Parchment | `#f7f0e3` | Canvas |
-| Kraft | `#ede3cc` | Surfaces |
-| Espresso | `#2d1a08` | Type and structure |
-| Burnt orange | `#c8620a` | Primary action and identity |
-| Warm olive | `#7a9448` | Success / savings |
-| Golden amber | `#c89020` | Warning / Ollama accent |
+| Paper | `#fbfaf6` | Canvas (dark: `#131519`) |
+| Ink | `#151512` | Type and structure (dark: `#f2f4f7`) |
+| Claude Code | `#b4441f` | Harness identity |
+| Ollama | `#6e40c9` | Harness identity |
+| Gemini CLI | `#1b5ec4` | Harness identity |
+| Antigravity | `#0e7b3c` | Harness identity, and "under the fee" |
+| Copilot | `#8a5300` | Harness identity |
+| Codex | `#2f3a44` | Harness identity, the one without a hue |
+| Over | `#c4322b` | List price above the fees |
 
-Display copy uses **Chakra Petch**. Values, tokens, and annotations use **IBM Plex Mono**.
+Numbers and headings are **Archivo**, body text **Hanken Grotesk**, machine names
+and model ids **IBM Plex Mono**. The mark is a dial reading part of full scale;
+the PNG icons are rendered from `frontend/public/icon.svg` with
+`rsvg-convert -w <size> -h <size> icon.svg -o icon-<size>.png`.
+
+The app installs as a PWA: serve it over HTTPS on your private network and add it
+to a phone's home screen.
 
 ---
 
