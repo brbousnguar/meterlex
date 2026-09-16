@@ -74,10 +74,11 @@ export default function More({ onReload }: { onReload: () => void }) {
           <div className="section-head"><h2 className="section-title">Agents</h2></div>
           <a className="linkout" href={cfg.openclaw_spend_url} target="_blank" rel="noopener noreferrer">
             <div>
-              <b>OpenClaw spend</b>
+              <b>Clawlex</b>
               <span>
-                Per agent, per session and per channel. Meterlex counts the same runs as the
-                OpenClaw harness; that app is where the detail lives.
+                What each agent did and whether it is healthy: runs, failures, tools, silent
+                agents. Meterlex counts the same runs as the OpenClaw harness; Clawlex is where
+                the run-level detail lives.
               </span>
             </div>
           </a>
