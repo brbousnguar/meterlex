@@ -148,8 +148,8 @@ export type MachineRow = GroupRow & {
   machine: string;
   last_seen_at: string | null;
   registered: boolean;
-  projects: { project: string; tokens: number; turns: number }[];
-  sources: { source: string; tokens: number; turns: number }[];
+  projects: { project: string; tokens: number; turns: number; cost_eur: number }[];
+  sources: { source: string; tokens: number; turns: number; cost_eur: number }[];
 };
 export type ModelRowX  = GroupRow & { model_id: string; source: string };
 export type ProjectRowX = GroupRow & { project: string };
@@ -162,6 +162,8 @@ export interface Bucket {
   cost_eur: number;
   by_source: Record<string, number>;
   by_machine: Record<string, number>;
+  cost_by_source: Record<string, number>;
+  cost_by_machine: Record<string, number>;
 }
 
 export interface Overview {

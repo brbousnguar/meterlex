@@ -1,11 +1,12 @@
 import type { Overview } from "../api";
 import { RankRows, SplitBar } from "../components/charts";
-import { fmtEur, fmtInt, fmtTok, harness, pct } from "../lib";
+import { byMeasure, fmtEur, fmtInt, fmtMeasure, fmtTok, harness, measure, pct, type Unit } from "../lib";
 
 /** Models are ranked, not painted: the dot carries the harness that ran them. */
-export default function Models({ data }: { data: Overview }) {
-  const total = data.totals.tokens;
-  const top = data.by_model[0];
+export default function Models({ data, unit }: { data: Overview; unit: Unit }) {
+  const total = measure(unit, data.totals);
+  const models = byMeasure(unit, data.by_model);
+  const top = models[0];
 
   return (
     <>
@@ -22,7 +23,7 @@ export default function Models({ data }: { data: Overview }) {
             <div className="stat">
               <div className="stat-label">Tokens</div>
               <div className="stat-value">{fmtTok(top.tokens)}</div>
-              <div className="stat-sub">{pct(top.tokens, total).toFixed(0)}% of everything</div>
+              <div className="stat-sub">{pct(measure(unit, top), total).toFixed(0)}% of everything</div>
             </div>
             <div className="stat">
               <div className="stat-label">Replies</div>
@@ -49,14 +50,14 @@ export default function Models({ data }: { data: Overview }) {
       <section className="section">
         <div className="section-head">
           <h2 className="section-title">Every model this period</h2>
-          <div className="section-note">by tokens</div>
+          <div className="section-note">by {unit === "money" ? "list price" : "tokens"}</div>
         </div>
-        <RankRows rows={data.by_model.map((m) => ({
+        <RankRows rows={models.map((m) => ({
           key: m.model_id,
           name: <span className="mono">{m.model_id}</span>,
-          value: fmtTok(m.tokens),
-          sub: `${fmtInt(m.turns)} replies · ${fmtEur(m.cost_eur)}`,
-          share: pct(m.tokens, data.by_model[0]?.tokens || 1),
+          value: fmtMeasure(unit, m),
+          sub: unit === "money" ? `${fmtInt(m.turns)} replies · ${fmtTok(m.tokens)}` : `${fmtInt(m.turns)} replies · ${fmtEur(m.cost_eur)}`,
+          share: pct(measure(unit, m), top ? measure(unit, top) : 1),
           fill: harness(m.source).fill,
         }))} />
       </section>

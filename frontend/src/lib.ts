@@ -26,12 +26,43 @@ export const fmtEur = (n: number) =>
 
 export const fmtInt = (n: number) => n.toLocaleString("fr-FR");
 
+/** Money on an axis or a tick: whole euros, because "€65,00" next to "€260"
+ *  reads as noise. */
+export const fmtEurShort = (n: number) => `€${Math.round(n).toLocaleString("fr-FR")}`;
+
+/** How many drums a money reading needs — no long run of leading zeros. */
+export const moneyDrums = (eur: number) => Math.max(4, String(Math.round(Math.abs(eur))).length);
+
 export const pct = (part: number, whole: number) => (whole > 0 ? (part / whole) * 100 : 0);
 
 /** Growth against the same-length period before, or null when there is nothing
  *  to compare with (a first week, or a period that was empty). */
 export const change = (now: number, before?: number | null) =>
   before && before > 0 ? ((now - before) / before) * 100 : null;
+
+/* ── Units ────────────────────────────────────────────────────────────────
+   Every reading is either a count of tokens or what those tokens would have
+   cost at API rates. One toggle switches the whole app; the token split is the
+   single exception, because it has no per-component price. */
+export type Unit = "tokens" | "money";
+
+export const UNITS: { id: Unit; short: string; noun: string }[] = [
+  { id: "tokens", short: "Tokens", noun: "tokens" },
+  { id: "money",  short: "Euros",  noun: "at list price" },
+];
+
+/** The figure a row contributes in the current unit. */
+export const measure = (unit: Unit, row: { tokens: number; cost_eur: number }) =>
+  unit === "money" ? row.cost_eur : row.tokens;
+
+/** Ranked by whatever the toggle is reading. The hub ranks by tokens; in euros
+ *  a cheap-but-huge model must not sit above an expensive small one. */
+export const byMeasure = <T extends { tokens: number; cost_eur: number }>(unit: Unit, rows: T[]) =>
+  [...rows].sort((a, b) => measure(unit, b) - measure(unit, a));
+
+/** That figure, formatted. */
+export const fmtMeasure = (unit: Unit, row: { tokens: number; cost_eur: number }) =>
+  unit === "money" ? fmtEur(row.cost_eur) : fmtTok(row.tokens);
 
 /* ── The token split, in the order it is always shown ─────────────────────── */
 export const SPLIT: { key: keyof TokenSplit; label: string; fill: string; hint: string }[] = [

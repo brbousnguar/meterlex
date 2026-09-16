@@ -88,10 +88,22 @@ def test_each_machine_carries_its_folders_and_harnesses(client, engine):
     _seed(engine)
     body = client.get("/api/overview", params={"period": "weekly", "ref": "2026-09-16"}).json()
     machines = {m["machine"]: m for m in body["by_machine"]}
-    assert machines["brahim-mini"]["projects"] == [{"project": "server", "tokens": 135, "turns": 1}]
-    assert machines["brahim-mini"]["sources"] == [{"source": "claude-code", "tokens": 135, "turns": 1}]
-    # A machine that sent nothing this period still lists, with empty strips.
-    assert machines["sqli-5cd6030lcj"]["sources"] == [{"source": "codex", "tokens": 300, "turns": 1}]
+    assert machines["brahim-mini"]["projects"] == [
+        {"project": "server", "tokens": 135, "turns": 1, "cost_eur": 1.5}]
+    assert machines["brahim-mini"]["sources"] == [
+        {"source": "claude-code", "tokens": 135, "turns": 1, "cost_eur": 1.5}]
+    assert machines["sqli-5cd6030lcj"]["sources"] == [
+        {"source": "codex", "tokens": 300, "turns": 1, "cost_eur": 0.5}]
+
+
+def test_series_buckets_carry_money_as_well_as_tokens(client, engine):
+    """The daily bars switch between tokens and euros without a second call."""
+    _seed(engine)
+    body = client.get("/api/overview", params={"period": "weekly", "ref": "2026-09-16"}).json()
+    tuesday = next(b for b in body["series"] if b["bucket"] == "2026-09-15")
+    assert tuesday["by_machine"] == {"brahim-mini": 135}
+    assert tuesday["cost_by_machine"] == {"brahim-mini": 1.5}
+    assert tuesday["cost_by_source"] == {"claude-code": 1.5}
 
 
 def test_overview_rejects_an_unknown_period(client):

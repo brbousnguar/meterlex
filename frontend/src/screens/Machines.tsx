@@ -1,14 +1,14 @@
 import type { Overview } from "../api";
 import Odometer from "../components/Odometer";
 import { MachineDays, MiniRank, RankRows } from "../components/charts";
-import { ago, fmtEur, fmtInt, fmtTok, folderLabel, harness, pct } from "../lib";
+import { ago, byMeasure, fmtEur, fmtInt, fmtMeasure, fmtTok, folderLabel, harness, measure, moneyDrums, pct, type Unit } from "../lib";
 
 /** One meter per machine: its reading for the period, its share of the wall,
  *  how many tokens it burned each day, what it worked in, and whether its
  *  collector is still reporting. */
-export default function Machines({ data }: { data: Overview }) {
-  const total = data.totals.tokens;
-  const rows = [...data.by_machine].sort((a, b) => b.tokens - a.tokens);
+export default function Machines({ data, unit }: { data: Overview; unit: Unit }) {
+  const total = measure(unit, data.totals);
+  const rows = byMeasure(unit, data.by_machine);
   const silent = rows.filter((m) => m.tokens === 0);
   const live = rows.filter((m) => m.tokens > 0);
 
@@ -22,44 +22,50 @@ export default function Machines({ data }: { data: Overview }) {
         <div className="meters">
           {live.map((m) => {
             const seen = ago(m.last_seen_at);
-            const topFolder = m.projects[0]?.tokens || 1;
+            const folders = byMeasure(unit, m.projects);
+            const sources = byMeasure(unit, m.sources);
+            const topFolder = folders[0] ? measure(unit, folders[0]) : 1;
             return (
               <article className="meter" key={m.machine}>
                 <div className="meter-head">
                   <span className="meter-name">{m.machine}</span>
-                  <span className="meter-reading">{fmtTok(m.tokens)}</span>
+                  <span className="meter-reading">{fmtMeasure(unit, m)}</span>
                 </div>
-                <Odometer value={m.tokens} small digits={9} />
+                {unit === "money"
+                  ? <Odometer value={Math.round(m.cost_eur)} small digits={moneyDrums(m.cost_eur)} />
+                  : <Odometer value={m.tokens} small digits={9} />}
                 <div className="rank-bar">
-                  <i style={{ width: `${Math.max(1.5, pct(m.tokens, total))}%`, background: "var(--ink-2)" }} />
+                  <i style={{ width: `${Math.max(1.5, pct(measure(unit, m), total))}%`, background: "var(--ink-2)" }} />
                 </div>
 
                 <div>
-                  <div className="card-label">{data.period === "yearly" ? "Tokens by month" : "Tokens by day"}</div>
-                  <MachineDays series={data.series} machine={m.machine} period={data.period} />
+                  <div className="card-label">
+                    {unit === "money" ? "Cost" : "Tokens"} by {data.period === "yearly" ? "month" : "day"}
+                  </div>
+                  <MachineDays series={data.series} machine={m.machine} period={data.period} unit={unit} />
                 </div>
 
-                {m.projects.length > 0 && (
+                {folders.length > 0 && (
                   <div>
                     <div className="card-label">Folders</div>
-                    <MiniRank rows={m.projects.map((p) => ({
+                    <MiniRank rows={folders.map((p) => ({
                       key: p.project,
                       name: <span title={p.project}>{folderLabel(p.project)}</span>,
-                      value: fmtTok(p.tokens),
-                      share: pct(p.tokens, topFolder),
+                      value: fmtMeasure(unit, p),
+                      share: pct(measure(unit, p), topFolder),
                       fill: "var(--ink-3)",
                     }))} />
                   </div>
                 )}
 
-                {m.sources.length > 0 && (
+                {sources.length > 0 && (
                   <div>
                     <div className="card-label">Harnesses</div>
-                    <MiniRank rows={m.sources.map((s) => ({
+                    <MiniRank rows={sources.map((s) => ({
                       key: s.source,
                       name: <span style={{ fontFamily: "var(--read)" }}>{harness(s.source).label}</span>,
-                      value: fmtTok(s.tokens),
-                      share: pct(s.tokens, m.tokens),
+                      value: fmtMeasure(unit, s),
+                      share: pct(measure(unit, s), measure(unit, m)),
                       fill: harness(s.source).fill,
                     }))} />
                   </div>
@@ -67,9 +73,9 @@ export default function Machines({ data }: { data: Overview }) {
 
                 <div className="meter-foot">
                   <span className="live" data-state={seen.state}>{seen.text}</span>
-                  <span>{pct(m.tokens, total).toFixed(0)}% of the period</span>
+                  <span>{pct(measure(unit, m), total).toFixed(0)}% of the period</span>
                   <span>{fmtInt(m.turns)} replies</span>
-                  <span>{fmtEur(m.cost_eur)} list</span>
+                  <span>{unit === "money" ? `${fmtTok(m.tokens)} tokens` : `${fmtEur(m.cost_eur)} list`}</span>
                 </div>
               </article>
             );
@@ -99,12 +105,12 @@ export default function Machines({ data }: { data: Overview }) {
           <h2 className="section-title">Who ran what</h2>
           <div className="section-note">harness share of the period</div>
         </div>
-        <RankRows rows={data.by_source.filter((s) => s.tokens > 0).map((s) => ({
+        <RankRows rows={byMeasure(unit, data.by_source).filter((s) => s.tokens > 0).map((s) => ({
           key: s.source,
           name: <span>{harness(s.source).label}</span>,
-          value: fmtTok(s.tokens),
+          value: fmtMeasure(unit, s),
           sub: `${s.models} model${s.models === 1 ? "" : "s"}`,
-          share: pct(s.tokens, total),
+          share: pct(measure(unit, s), total),
           fill: harness(s.source).fill,
         }))} />
       </section>

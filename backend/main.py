@@ -533,11 +533,15 @@ def overview(
     # answers "533M on what?" without a second request.
     def per_machine(col, key, empty, limit):
         out: dict = {}
-        for mach, value, tok, n in session.exec(
-            select(UsageTurn.machine, col, func.sum(UsageTurn.total_tokens), func.count(UsageTurn.id))
+        for mach, value, tok, n, eur in session.exec(
+            select(UsageTurn.machine, col, func.sum(UsageTurn.total_tokens), func.count(UsageTurn.id),
+                   func.sum(UsageTurn.cost_eur))
             .where(*base).group_by(UsageTurn.machine, col)
         ).all():
-            out.setdefault(mach, []).append({key: value or empty, "tokens": int(tok or 0), "turns": int(n)})
+            out.setdefault(mach, []).append({
+                key: value or empty, "tokens": int(tok or 0), "turns": int(n),
+                "cost_eur": round(eur or 0, 4),
+            })
         for rows in out.values():
             rows.sort(key=lambda r: -r["tokens"])
             del rows[limit:]
@@ -575,7 +579,8 @@ def overview(
     # Series, bucketed by local day (month over a year).
     hour = func.strftime("%Y-%m-%d %H", UsageTurn.ts)
     series = {b: {"bucket": b, "tokens": 0, "turns": 0, "cost_eur": 0.0,
-                  "by_source": {}, "by_machine": {}}
+                  "by_source": {}, "by_machine": {},
+                  "cost_by_source": {}, "cost_by_machine": {}}
               for b in _buckets_for(period, start, end)}
     for h, src, mach, n, tok, eur in session.exec(
         select(hour, UsageTurn.source, UsageTurn.machine, func.count(UsageTurn.id),
@@ -592,6 +597,11 @@ def overview(
         e["cost_eur"] = round(e["cost_eur"] + (eur or 0), 4)
         e["by_source"][src] = e["by_source"].get(src, 0) + tok
         e["by_machine"][mach] = e["by_machine"].get(mach, 0) + tok
+        # The same buckets in money, so the daily bars can switch measure
+        # without asking the hub again.
+        eur = round(eur or 0, 4)
+        e["cost_by_source"][src] = round(e["cost_by_source"].get(src, 0) + eur, 4)
+        e["cost_by_machine"][mach] = round(e["cost_by_machine"].get(mach, 0) + eur, 4)
     series = [series[b] for b in sorted(series)]
     busiest = max(series, key=lambda b: b["tokens"], default=None)
 
