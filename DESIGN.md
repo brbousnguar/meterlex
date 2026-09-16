@@ -104,6 +104,22 @@ Forms follow the dataviz skill; the decisions worth writing down:
 - Every chart has a hover layer, and every figure it shows is also readable as text
   somewhere on the same screen.
 
+## Units
+
+One toggle beside the period control switches **every figure** between tokens and
+euros, and is remembered between visits. Rankings re-sort to whatever is being
+read — in euros a cheap-but-huge model must not sit above an expensive small one
+— and the charts change measure from the same response, because the series
+carries both.
+
+**The token split is the exception**, and always reads tokens: cache read against
+output is a breakdown of what the tokens *were*, and no per-component price
+exists to convert it with. The four-stat tiles also keep showing both, since that
+is where the comparison between list price and what you actually pay lives.
+
+Money is always the **list price** in euros: what those tokens would have cost at
+API rates, not what was billed.
+
 ## Periods
 
 Periods are **local** (`LOCAL_TZ`, default `Europe/Paris`), never UTC: a week starts

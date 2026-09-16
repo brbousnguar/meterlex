@@ -1,12 +1,16 @@
 import type { Overview } from "../api";
 import Odometer from "../components/Odometer";
 import { DayBars, RankRows, SplitBar } from "../components/charts";
-import { bucketFull, change, fmtEur, fmtInt, fmtTok, folderLabel, harness, pct } from "../lib";
+import { bucketFull, byMeasure, change, fmtEur, fmtInt, fmtMeasure, fmtTok, folderLabel, harness, measure, moneyDrums, pct, type Unit } from "../lib";
 import type { Tab } from "../App";
 
-export default function Now({ data, go }: { data: Overview; go: (t: Tab) => void }) {
+export default function Now({ data, unit, go }: { data: Overview; unit: Unit; go: (t: Tab) => void }) {
   const t = data.totals;
-  const delta = change(t.tokens, data.previous?.tokens);
+  const money = unit === "money";
+  const total = measure(unit, t);
+  const delta = money
+    ? change(t.cost_eur, data.previous?.cost_eur)
+    : change(t.tokens, data.previous?.tokens);
   const paidRatio = t.sub_eur > 0 ? t.cost_eur / t.sub_eur : null;
   const cacheShare = pct(t.cache_read, t.tokens);
 
@@ -14,8 +18,13 @@ export default function Now({ data, go }: { data: Overview; go: (t: Tab) => void
     <>
       <section className="reading">
         {/* The header already names the period; this is the reading itself. */}
-        <div className="reading-label">metered on {data.totals.machines || "no"} machine{data.totals.machines === 1 ? "" : "s"}</div>
-        <Odometer value={t.tokens} unit="tokens" digits={data.period === "weekly" ? 9 : 10} />
+        <div className="reading-label">
+          {money ? `${fmtEur(t.cost_eur)} at list price, ` : ""}
+          metered on {t.machines || "no"} machine{t.machines === 1 ? "" : "s"}
+        </div>
+        {money
+          ? <Odometer value={Math.round(t.cost_eur)} unit="euros" digits={moneyDrums(t.cost_eur)} />
+          : <Odometer value={t.tokens} unit="tokens" digits={data.period === "weekly" ? 9 : 10} />}
         <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
           {delta !== null && (
             <span className="delta" data-dir={delta >= 0 ? "up" : "down"}>
@@ -65,14 +74,16 @@ export default function Now({ data, go }: { data: Overview; go: (t: Tab) => void
 
       <section className="section">
         <div className="section-head">
-          <h2 className="section-title">{data.period === "yearly" ? "Tokens by month" : "Tokens by day"}</h2>
+          <h2 className="section-title">
+            {money ? "Cost" : "Tokens"} by {data.period === "yearly" ? "month" : "day"}
+          </h2>
           {data.busiest && (
             <div className="section-note">
-              busiest: {bucketFull(data.busiest.bucket)} · {fmtTok(data.busiest.tokens)}
+              busiest: {bucketFull(data.busiest.bucket)} · {fmtMeasure(unit, data.busiest)}
             </div>
           )}
         </div>
-        <DayBars series={data.series} period={data.period} />
+        <DayBars series={data.series} period={data.period} unit={unit} />
       </section>
 
       <section className="section">
@@ -88,12 +99,12 @@ export default function Now({ data, go }: { data: Overview; go: (t: Tab) => void
           <h2 className="section-title">Harnesses</h2>
           <button className="section-note" onClick={() => go("harnesses")}>all {data.by_source.length} →</button>
         </div>
-        <RankRows rows={data.by_source.filter((s) => s.tokens > 0).slice(0, 4).map((s) => ({
+        <RankRows rows={byMeasure(unit, data.by_source).filter((s) => s.tokens > 0).slice(0, 4).map((s) => ({
           key: s.source,
           name: <span>{harness(s.source).label}</span>,
-          value: fmtTok(s.tokens),
-          sub: `${fmtEur(s.cost_eur)} list · ${fmtEur(s.sub_eur)} paid`,
-          share: pct(s.tokens, t.tokens),
+          value: fmtMeasure(unit, s),
+          sub: money ? `${fmtTok(s.tokens)} · ${fmtEur(s.sub_eur)} paid` : `${fmtEur(s.cost_eur)} list · ${fmtEur(s.sub_eur)} paid`,
+          share: pct(measure(unit, s), total),
           fill: harness(s.source).fill,
           onClick: () => go("harnesses"),
         }))} />
@@ -104,12 +115,12 @@ export default function Now({ data, go }: { data: Overview; go: (t: Tab) => void
           <h2 className="section-title">Machines</h2>
           <button className="section-note" onClick={() => go("machines")}>all {data.by_machine.length} →</button>
         </div>
-        <RankRows rows={data.by_machine.filter((m) => m.tokens > 0).slice(0, 4).map((m) => ({
+        <RankRows rows={byMeasure(unit, data.by_machine).filter((m) => m.tokens > 0).slice(0, 4).map((m) => ({
           key: m.machine,
           name: <span className="mono">{m.machine}</span>,
-          value: fmtTok(m.tokens),
+          value: fmtMeasure(unit, m),
           sub: `${fmtInt(m.turns)} replies`,
-          share: pct(m.tokens, t.tokens),
+          share: pct(measure(unit, m), total),
           fill: "var(--ink-2)",
           onClick: () => go("machines"),
         }))} />
@@ -120,12 +131,12 @@ export default function Now({ data, go }: { data: Overview; go: (t: Tab) => void
           <h2 className="section-title">Where the work happened</h2>
           <div className="section-note">top folders</div>
         </div>
-        <RankRows rows={data.by_project.slice(0, 6).map((p) => ({
+        <RankRows rows={byMeasure(unit, data.by_project).slice(0, 6).map((p) => ({
           key: p.project,
           name: <span className="mono" title={p.project}>{folderLabel(p.project)}</span>,
-          value: fmtTok(p.tokens),
-          sub: fmtEur(p.cost_eur),
-          share: pct(p.tokens, data.by_project[0]?.tokens || 1),
+          value: fmtMeasure(unit, p),
+          sub: money ? fmtTok(p.tokens) : fmtEur(p.cost_eur),
+          share: pct(measure(unit, p), measure(unit, byMeasure(unit, data.by_project)[0] ?? p)),
           fill: "var(--ink-3)",
         }))} />
       </section>

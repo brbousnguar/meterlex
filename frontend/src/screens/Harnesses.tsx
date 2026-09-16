@@ -1,13 +1,13 @@
 import type { Overview } from "../api";
 import { RankRows, SplitBar } from "../components/charts";
-import { fmtEur, fmtInt, fmtTok, harness, pct } from "../lib";
+import { byMeasure, fmtEur, fmtInt, fmtMeasure, fmtTok, harness, measure, pct, type Unit } from "../lib";
 
 /** Per harness: what it burned, and whether its subscription is paying off.
  *  "Earns" is list price ÷ fee — above 1× the subscription is cheaper than the
  *  API would have been, below it you are paying for a seat you barely use. */
-export default function Harnesses({ data }: { data: Overview }) {
-  const rows = [...data.by_source].sort((a, b) => b.tokens - a.tokens);
-  const total = data.totals.tokens;
+export default function Harnesses({ data, unit }: { data: Overview; unit: Unit }) {
+  const rows = byMeasure(unit, data.by_source);
+  const total = measure(unit, data.totals);
 
   return (
     <>
@@ -34,7 +34,7 @@ export default function Harnesses({ data }: { data: Overview }) {
                   <div className="stat">
                     <div className="stat-label">Tokens</div>
                     <div className="stat-value">{fmtTok(s.tokens)}</div>
-                    <div className="stat-sub">{pct(s.tokens, total).toFixed(0)}% of the period</div>
+                    <div className="stat-sub">{pct(measure(unit, s), total).toFixed(0)}% of the period</div>
                   </div>
                   <div className="stat">
                     <div className="stat-label">Replies</div>
@@ -68,12 +68,12 @@ export default function Harnesses({ data }: { data: Overview }) {
           <h2 className="section-title">How it was run</h2>
           <div className="section-note">interactive, scheduled or a subagent</div>
         </div>
-        <RankRows rows={data.by_origin.map((o) => ({
+        <RankRows rows={byMeasure(unit, data.by_origin).map((o) => ({
           key: o.origin,
           name: <span>{o.origin}</span>,
-          value: fmtTok(o.tokens),
+          value: fmtMeasure(unit, o),
           sub: `${fmtInt(o.turns)} replies`,
-          share: pct(o.tokens, total),
+          share: pct(measure(unit, o), total),
           fill: "var(--ink-3)",
         }))} />
       </section>

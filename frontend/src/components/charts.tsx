@@ -2,7 +2,7 @@ import {
   Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
 import type { Bucket, TokenSplit } from "../api";
-import { bucketFull, bucketLabel, fmtEur, fmtInt, fmtTok, harness, pct, SPLIT } from "../lib";
+import { bucketFull, bucketLabel, fmtEur, fmtEurShort, fmtInt, fmtTok, harness, pct, SPLIT, type Unit } from "../lib";
 
 /* Recharts writes the tick colour as an SVG attribute, which the stylesheet
    cannot override — so the axes carry it as a prop. */
@@ -12,9 +12,9 @@ const TICK = { fill: "var(--ink-3)", fontFamily: "var(--mono)", fontSize: 10 };
    split lives in the tooltip, because a six-colour stack fails CVD separation
    and answers a question that does not need colour. */
 
-export function DayBars({ series, period }: { series: Bucket[]; period: string }) {
-  const data = series.map((b) => ({ ...b, label: bucketLabel(b.bucket) }));
-  const peak = Math.max(...data.map((d) => d.tokens), 0);
+export function DayBars({ series, period, unit }: { series: Bucket[]; period: string; unit: Unit }) {
+  const data = series.map((b) => ({ ...b, label: bucketLabel(b.bucket), v: unit === "money" ? b.cost_eur : b.tokens }));
+  const peak = Math.max(...data.map((d) => d.v), 0);
   return (
     <div style={{ height: 210, margin: "4px -6px 0" }}>
       <ResponsiveContainer width="100%" height="100%">
@@ -22,14 +22,14 @@ export function DayBars({ series, period }: { series: Bucket[]; period: string }
           <CartesianGrid vertical={false} />
           <XAxis dataKey="label" tickLine={false} axisLine={false} interval="preserveStartEnd" minTickGap={14}
                  tick={TICK} />
-          <YAxis width={56} tickLine={false} axisLine={false} tickFormatter={(v: number) => fmtTok(v)}
-                 tick={TICK} />
-          <Tooltip cursor={{ fill: "var(--surface-2)" }} content={<BucketTip />} />
-          <Bar dataKey="tokens" isAnimationActive={false}>
+          <YAxis width={56} tickLine={false} axisLine={false} tick={TICK}
+                 tickFormatter={(v: number) => (unit === "money" ? fmtEurShort(v) : fmtTok(v))} />
+          <Tooltip cursor={{ fill: "var(--surface-2)" }} content={<BucketTip unit={unit} />} />
+          <Bar dataKey="v" isAnimationActive={false}>
             {data.map((d) => (
               /* The busiest bucket is the only one that changes weight: it is
                  the answer to "when did this happen", not a second series. */
-              <Cell key={d.bucket} fill={d.tokens === peak && peak > 0 ? "var(--ink)" : "var(--ink-3)"} />
+              <Cell key={d.bucket} fill={d.v === peak && peak > 0 ? "var(--ink)" : "var(--ink-3)"} />
             ))}
           </Bar>
         </BarChart>
@@ -38,10 +38,11 @@ export function DayBars({ series, period }: { series: Bucket[]; period: string }
   );
 }
 
-function BucketTip({ active, payload }: any) {
+function BucketTip({ active, payload, unit }: any) {
   if (!active || !payload?.length) return null;
   const b: Bucket = payload[0].payload;
-  const rows = Object.entries(b.by_source).sort((a, c) => c[1] - a[1]);
+  const money = unit === "money";
+  const rows = Object.entries(money ? b.cost_by_source : b.by_source).sort((a, c) => c[1] - a[1]);
   return (
     <div className="tip">
       <div className="tip-head">{bucketFull(b.bucket)}</div>
@@ -53,7 +54,7 @@ function BucketTip({ active, payload }: any) {
           <span style={{ marginLeft: 0, display: "inline-flex", alignItems: "center", gap: 6 }}>
             <i className="dot" style={{ background: harness(src).fill }} /> {harness(src).label}
           </span>
-          <span>{fmtTok(tok)}</span>
+          <span>{money ? fmtEur(tok) : fmtTok(tok)}</span>
         </div>
       ))}
     </div>
@@ -63,15 +64,19 @@ function BucketTip({ active, payload }: any) {
 /** One machine's reading per bucket. This replaced a sparkline: a shape with no
  *  numbers cannot answer "how many tokens on Tuesday", which is the question
  *  the machine screen exists for. */
-export function MachineDays({ series, machine, period }: { series: Bucket[]; machine: string; period: string }) {
+export function MachineDays({ series, machine, period, unit }: {
+  series: Bucket[]; machine: string; period: string; unit: Unit;
+}) {
   const data = series.map((b) => ({
     bucket: b.bucket,
     label: bucketLabel(b.bucket),
     tokens: b.by_machine[machine] ?? 0,
+    cost_eur: b.cost_by_machine[machine] ?? 0,
+    v: unit === "money" ? (b.cost_by_machine[machine] ?? 0) : (b.by_machine[machine] ?? 0),
   }));
-  const peak = Math.max(...data.map((d) => d.tokens), 0);
+  const peak = Math.max(...data.map((d) => d.v), 0);
   if (peak === 0) return <p className="rank-sub">Nothing from this machine in the period.</p>;
-  const busiest = data.find((d) => d.tokens === peak)!;
+  const busiest = data.find((d) => d.v === peak)!;
   return (
     <>
       <div style={{ height: 94, margin: "0 -4px" }}>
@@ -81,15 +86,17 @@ export function MachineDays({ series, machine, period }: { series: Bucket[]; mac
             <XAxis dataKey="label" tickLine={false} axisLine={false} tick={TICK}
                    interval="preserveStartEnd" minTickGap={10} />
             <Tooltip cursor={{ fill: "var(--surface-2)" }} content={<DayTip />} />
-            <Bar dataKey="tokens" isAnimationActive={false}>
+            <Bar dataKey="v" isAnimationActive={false}>
               {data.map((d) => (
-                <Cell key={d.bucket} fill={d.tokens === peak ? "var(--ink)" : "var(--ink-3)"} />
+                <Cell key={d.bucket} fill={d.v === peak ? "var(--ink)" : "var(--ink-3)"} />
               ))}
             </Bar>
           </BarChart>
         </ResponsiveContainer>
       </div>
-      <p className="rank-sub">busiest {bucketFull(busiest.bucket)} · {fmtTok(peak)}</p>
+      <p className="rank-sub">
+        busiest {bucketFull(busiest.bucket)} · {unit === "money" ? fmtEur(peak) : fmtTok(peak)}
+      </p>
     </>
   );
 }
@@ -100,7 +107,7 @@ function DayTip({ active, payload }: any) {
   return (
     <div className="tip">
       <div className="tip-head">{bucketFull(d.bucket)}</div>
-      <div className="tip-row">{fmtInt(d.tokens)} tokens</div>
+      <div className="tip-row">{fmtInt(d.tokens)} tokens <span>{fmtEur(d.cost_eur)}</span></div>
     </div>
   );
 }

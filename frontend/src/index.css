@@ -148,6 +148,10 @@ h1, h2, h3, .fig, [data-fig] {
 
 /* Period control: Week · Month · Year, with steppers. */
 .period { display: flex; align-items: center; gap: 8px; padding: 10px 0 12px; flex-wrap: wrap; }
+/* The unit toggle sits with the period controls; on a phone it takes the row
+   the period label leaves free rather than squeezing beside the steppers. */
+.period .seg + .seg { margin-left: auto; }
+@media (max-width: 560px) { .period .seg + .seg { margin-left: 0; } }
 .seg {
   display: inline-flex; border: 1px solid var(--rule); border-radius: var(--pill);
   overflow: hidden; background: var(--surface);

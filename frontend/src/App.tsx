@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, type Overview, type Period } from "./api";
-import { PERIODS, periodLabel, stepRef, windowLabel } from "./lib";
+import { PERIODS, periodLabel, stepRef, UNITS, windowLabel, type Unit } from "./lib";
 import Now from "./screens/Now";
 import Machines from "./screens/Machines";
 import Harnesses from "./screens/Harnesses";
@@ -42,6 +42,7 @@ const recall = (k: string) => { try { return localStorage.getItem(k); } catch { 
 export default function App() {
   const [tab, setTab] = useState<Tab>(() => (recall("mx.tab") as Tab) || "now");
   const [period, setPeriod] = useState<Period>(() => (recall("mx.period") as Period) || "weekly");
+  const [unit, setUnit] = useState<Unit>(() => (recall("mx.unit") as Unit) || "tokens");
   const [ref, setRef] = useState<string | null>(null);      // null = the current period
   const [data, setData] = useState<Overview | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -69,6 +70,7 @@ export default function App() {
 
   const go = (t: Tab) => { setTab(t); remember("mx.tab", t); window.scrollTo(0, 0); };
   const pick = (p: Period) => { setPeriod(p); setRef(null); remember("mx.period", p); };
+  const pickUnit = (u: Unit) => { setUnit(u); remember("mx.unit", u); };
   const step = (delta: number) => {
     const next = stepRef(period, ref, delta);
     const current = stepRef(period, null, 0);
@@ -104,6 +106,11 @@ export default function App() {
           </div>
           <button className="step" onClick={() => step(-1)} aria-label="Previous period">‹</button>
           <button className="step" onClick={() => step(1)} disabled={isCurrent} aria-label="Next period">›</button>
+          <div className="seg" role="group" aria-label="Read every figure as">
+            {UNITS.map((u) => (
+              <button key={u.id} aria-pressed={unit === u.id} onClick={() => pickUnit(u.id)}>{u.short}</button>
+            ))}
+          </div>
           <div className="period-label">
             {label}
             <small>{data ? windowLabel(period, data.from_local, data.to_local) : " "}</small>
@@ -123,10 +130,10 @@ export default function App() {
       <main className="content">
         {error && <p className="err">The hub did not answer ({error}). Retrying every minute.</p>}
         {!data && !error && <p className="empty">Reading the meters…</p>}
-        {data && tab === "now"       && <Now data={data} go={go} />}
-        {data && tab === "machines"  && <Machines data={data} />}
-        {data && tab === "harnesses" && <Harnesses data={data} />}
-        {data && tab === "models"    && <Models data={data} />}
+        {data && tab === "now"       && <Now data={data} unit={unit} go={go} />}
+        {data && tab === "machines"  && <Machines data={data} unit={unit} />}
+        {data && tab === "harnesses" && <Harnesses data={data} unit={unit} />}
+        {data && tab === "models"    && <Models data={data} unit={unit} />}
         {tab === "more" && <More onReload={load} />}
       </main>
     </div>
