@@ -56,7 +56,7 @@ export default function Now({ data, unit, go }: { data: Overview; unit: Unit; go
           </div>
           <div className="stat">
             <div className="stat-label">Subscriptions earn</div>
-            <div className={`stat-value ${paidRatio && paidRatio >= 1 ? "under" : "over"}`}>
+            <div className={`stat-value ${paidRatio === null ? "" : paidRatio >= 1 ? "under" : "over"}`}>
               {paidRatio === null ? "—" : `${paidRatio.toFixed(1)}×`}
             </div>
             <div className="stat-sub">

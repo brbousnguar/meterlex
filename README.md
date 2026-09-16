@@ -40,6 +40,7 @@ host; transcripts never leave the machine that wrote them.
 - **Gemini CLI** — each message from `~/.gemini/tmp/<project>/chats/*.jsonl`, once: the CLI appends a message again every time it updates it. Cached input is its own count and thoughts are billed as output.
 - **Ollama** — non-Claude models run through Claude Code (`ollama launch claude`: GLM, Kimi, DeepSeek, MiniMax…). Ollama Cloud models are priced at Ollama's own per-token rates from model-prices; models that ran locally are €0.
 - **Copilot CLI** — per-session, per-model token totals from `~/.copilot/session-state/*/events.jsonl` (older CLIs: `~/.copilot/data.db`), priced at each model's rate. In-editor Copilot usage is not exposed locally and is not counted. Variable subscription charges can be entered as monthly bills in Prices & settings.
+- **OpenClaw agents** — every `model.completed` event in each agent's own database (`~/.openclaw/agents/<id>/agent/openclaw-agent.sqlite`), read incrementally by the event's timestamp. The **agent is the project** (`nova`, `rex`, `forge`), the session key says whether a person, a schedule or another agent started the run, and a model someone else hosts is named by its host (`ollama/…`, `openrouter/…`) so the rate card prices it correctly. OpenClaw carries **no subscription of its own**: its agents run on the plans already counted above, mostly Claude Max.
 - **Machines** — every turn records the machine it came from, and each machine's projects are stored as a full path, a folder name or a hash, as you choose per machine.
 
 ### What the app shows
@@ -98,6 +99,7 @@ Docker Compose automatically reads `.env` from the repository root.
 | `HUB_MACHINE` | The machine name for history stored before collectors reported per machine: use the name the hub machine's own collector reports under |
 | `LOCAL_TZ` | The zone periods are counted in (default `Europe/Paris`). A week starts Monday 00:00 there and a day at local midnight; rows stay stored in UTC |
 | `PRICES_URL` | Where the model-prices app is reachable from a browser. The Prices link on the More screen points there; leave empty to hide it |
+| `OPENCLAW_SPEND_URL` | Where the openclaw-spend app is reachable, for per-agent and per-session detail. The More screen links there; leave empty to hide it |
 
 The hub reads no session logs itself: every machine, the hub's own included,
 runs the collector. To reach the hub from other machines, keep it off the

@@ -20,7 +20,7 @@ import pricing
 
 log = logging.getLogger("meterlex.ingest")
 
-SOURCES = {"claude-code", "ollama", "codex", "antigravity", "gemini-cli", "copilot"}
+SOURCES = {"claude-code", "ollama", "codex", "antigravity", "gemini-cli", "copilot", "openclaw"}
 ORIGINS = {"interactive", "automated", "subagent"}
 TOKEN_FIELDS = ("input_tokens", "output_tokens", "cache_read", "cache_write", "reasoning_tokens")
 MAX_TURNS_PER_BATCH = 5000

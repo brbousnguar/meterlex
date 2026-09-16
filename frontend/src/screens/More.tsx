@@ -8,6 +8,8 @@ const SUBS: { key: keyof Settings; source: string }[] = [
   { key: "sub_antigravity_eur",  source: "antigravity" },
   { key: "sub_ollama_eur",       source: "ollama" },
   { key: "sub_copilot_eur",      source: "copilot" },
+  // OpenClaw has no line here: its agents run on the plans above, and a fee
+  // entered twice is a fee counted twice.
 ];
 
 /** Everything that is not a reading: the link to the rate card, what the
@@ -66,6 +68,21 @@ export default function More({ onReload }: { onReload: () => void }) {
           </p>
         )}
       </section>
+
+      {cfg?.openclaw_spend_url && (
+        <section className="section">
+          <div className="section-head"><h2 className="section-title">Agents</h2></div>
+          <a className="linkout" href={cfg.openclaw_spend_url} target="_blank" rel="noopener noreferrer">
+            <div>
+              <b>OpenClaw spend</b>
+              <span>
+                Per agent, per session and per channel. Meterlex counts the same runs as the
+                OpenClaw harness; that app is where the detail lives.
+              </span>
+            </div>
+          </a>
+        </section>
+      )}
 
       <section className="section">
         <div className="section-head">

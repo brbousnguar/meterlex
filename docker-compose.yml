@@ -15,6 +15,8 @@ services:
       # Where the rate card's own app is reachable from a browser (its tailnet
       # address, so a phone can follow the link too). Set it in .env.
       PRICES_URL: ${PRICES_URL:-}
+      # The OpenClaw spend app, for per-agent and per-session detail.
+      OPENCLAW_SPEND_URL: ${OPENCLAW_SPEND_URL:-}
       # Periods (a week, a day) are counted in this zone, not UTC.
       LOCAL_TZ: ${LOCAL_TZ:-Europe/Paris}
     volumes:

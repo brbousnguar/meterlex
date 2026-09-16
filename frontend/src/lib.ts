@@ -10,6 +10,7 @@ export const HARNESS: Record<string, { label: string; fill: string; text: string
   antigravity:   { label: "Antigravity", fill: "var(--h-antigravity)", text: "var(--h-antigravity-text)", note: "Google" },
   "gemini-cli":  { label: "Gemini CLI",  fill: "var(--h-gemini)",      text: "var(--h-gemini-text)",      note: "Google" },
   copilot:       { label: "Copilot",     fill: "var(--h-copilot)",     text: "var(--h-copilot-text)",     note: "GitHub" },
+  openclaw:      { label: "OpenClaw",    fill: "var(--h-openclaw)",    text: "var(--h-openclaw-text)",    note: "your agents" },
 };
 export const harness = (s: string) =>
   HARNESS[s] ?? { label: s, fill: "var(--ink-3)", text: "var(--ink-2)", note: "" };

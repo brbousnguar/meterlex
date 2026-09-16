@@ -82,7 +82,7 @@ def ollama_cloud_id(model_id: str) -> str:
 
 
 def resolve_price(session: Session, model_id: str, source: Optional[str] = None) -> Optional[ModelPrice]:
-    if source == "ollama":
+    if source == "ollama" or model_id.startswith("ollama/"):
         # A model Ollama sells in its cloud is billed at Ollama's own rate;
         # anything else Ollama served ran on this machine, for free.
         row = session.get(ModelPrice, ollama_cloud_id(model_id))

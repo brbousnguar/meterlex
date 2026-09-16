@@ -104,6 +104,85 @@ def test_copilot_reads_per_model_totals(tmp_path):
         "session:claude-sonnet-5", 8, 132199, 49873, "/work/rbb", True)
 
 
+# ── OpenClaw agents ──────────────────────────────────────────────────────────
+
+def openclaw_db(root: Path, agent: str, events) -> Path:
+    import sqlite3
+    db = root / "agents" / agent / "agent" / "openclaw-agent.sqlite"
+    db.parent.mkdir(parents=True, exist_ok=True)
+    con = sqlite3.connect(db)
+    con.execute("CREATE TABLE trajectory_runtime_events (session_id TEXT, seq INT, run_id TEXT, "
+                "event_json TEXT, created_at INT)")
+    for created_at, event in events:
+        con.execute("INSERT INTO trajectory_runtime_events VALUES (?,?,?,?,?)",
+                    (event.get("sessionId"), event.get("seq"), event.get("runId"),
+                     json.dumps(event), created_at))
+    con.commit(); con.close()
+    return db
+
+
+def model_completed(seq, model="claude-sonnet-5", provider="anthropic",
+                    session_key="agent:ecu:telegram:direct:42", **usage):
+    u = {"input": 10, "output": 5, "cacheRead": 100, "cacheWrite": 20, "total": 135}
+    u.update(usage)
+    return {
+        "type": "model.completed", "modelId": model, "provider": provider, "seq": seq,
+        "runId": "run-1", "sessionId": "sess-1", "sessionKey": session_key,
+        "ts": "2026-09-16T08:00:00Z", "data": {"usage": u},
+    }
+
+
+def test_openclaw_counts_each_model_call_under_its_agent(tmp_path):
+    openclaw_db(tmp_path, "ecu", [(1, model_completed(1)), (2, {"type": "prompt.submitted", "seq": 2})])
+    [t] = list(mc.read_openclaw(tmp_path, new_state(), False))
+    assert t["source"] == "openclaw"
+    assert t["project"] == "ecu"              # the agent is the "where" of an agent run
+    assert t["model_id"] == "claude-sonnet-5"
+    assert (t["turn_key"], t["total_tokens"], t["cache_read"]) == ("run-1:1", 135, 100)
+    assert t["origin"] == "interactive"
+
+
+def test_openclaw_resumes_after_the_last_event_it_read(tmp_path):
+    openclaw_db(tmp_path, "nova", [(10, model_completed(1))])
+    state = new_state()
+    assert len(list(mc.read_openclaw(tmp_path, state, False))) == 1
+    assert list(mc.read_openclaw(tmp_path, state, False)) == []      # nothing new
+    db = tmp_path / "agents" / "nova" / "agent" / "openclaw-agent.sqlite"
+    import sqlite3
+    con = sqlite3.connect(db)
+    con.execute("INSERT INTO trajectory_runtime_events VALUES (?,?,?,?,?)",
+                ("sess-1", 2, "run-1", json.dumps(model_completed(2)), 20))
+    con.commit(); con.close()
+    [t] = list(mc.read_openclaw(tmp_path, state, False))
+    assert t["turn_key"] == "run-1:2"
+
+
+@pytest.mark.parametrize("session_key,origin", [
+    ("agent:forge:cron:abc", "automated"),
+    ("agent:nova:main", "automated"),               # the agent's own unattended session
+    ("agent:nova:agent:camille:main", "subagent"),
+    ("agent:ecu:signal:direct:1", "interactive"),
+    ("agent:ecu:telegram:direct:42", "interactive"),
+])
+def test_openclaw_origin_from_the_session_key(tmp_path, session_key, origin):
+    openclaw_db(tmp_path, "a", [(1, model_completed(1, session_key=session_key))])
+    [t] = list(mc.read_openclaw(tmp_path, new_state(), False))
+    assert t["origin"] == origin
+
+
+@pytest.mark.parametrize("provider,model,expected", [
+    ("ollama", "qwen3.6:35b-mlx", "ollama/qwen3.6:35b-mlx"),
+    ("openrouter", "anthropic/claude-sonnet-4.6", "openrouter/anthropic/claude-sonnet-4.6"),
+    ("anthropic", "claude-sonnet-5", "claude-sonnet-5"),
+    ("google", "gemini-3-flash-preview", "gemini-3-flash-preview"),
+])
+def test_openclaw_names_a_resold_model_by_its_host(tmp_path, provider, model, expected):
+    """The rate card keys resold models by who sells them."""
+    openclaw_db(tmp_path, "a", [(1, model_completed(1, model=model, provider=provider))])
+    [t] = list(mc.read_openclaw(tmp_path, new_state(), False))
+    assert t["model_id"] == expected
+
+
 @pytest.mark.parametrize("path, policy, expected", [
     ("/Users/me/Server/webapps/vitalex", "full", "/Users/me/Server/webapps/vitalex"),
     ("C:\\Users\\me\\RocheBB\\webapps\\rbb-em-dashboard", "basename", "rbb-em-dashboard"),

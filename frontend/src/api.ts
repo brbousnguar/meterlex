@@ -200,6 +200,7 @@ export interface MachineInfo {
 
 export interface Config {
   prices_url: string;
+  openclaw_spend_url: string;
   tz: string;
   hub_machine: string;
 }

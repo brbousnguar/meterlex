@@ -89,3 +89,17 @@ def test_mirror_pull_keeps_existing_rows_on_empty_response(session, monkeypatch)
 
     assert result["synced"] is False
     assert session.get(ModelPrice, "claude-sonnet-4-6") is not None
+
+
+def test_an_ollama_hosted_model_is_priced_by_its_host_whatever_ran_it(session):
+    """OpenClaw runs Ollama models too: the id names the host, so the Ollama
+    rule applies without the row having to claim source='ollama'."""
+    from models import ModelPrice
+    import pricing
+
+    session.add(ModelPrice(model_id="ollama/glm-5.2:cloud", prompt=1e-6, completion=2e-6))
+    session.commit()
+    row = pricing.resolve_price(session, "ollama/glm-5.2:cloud", source="openclaw")
+    assert row is not None and row.model_id == "ollama/glm-5.2:cloud"
+    # A model Ollama served locally has no cloud row, so it stays free.
+    assert pricing.resolve_price(session, "ollama/qwen3.6:35b-mlx", source="openclaw") is None

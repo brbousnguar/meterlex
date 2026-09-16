@@ -17,16 +17,13 @@ export default function Odometer({
     const fromEnd = padded.length - i;
     if (i > 0 && fromEnd % 3 === 0) cells.push(<i className="odo-gap" key={`g${i}`} />);
     cells.push(
-      <span className="odo-cell" data-lead={i < lead ? "true" : "false"} key={i}
-            style={small ? { fontSize: "1.3rem", padding: "1px 4px 2px" } : undefined}>
-        {ch}
-      </span>,
+      <span className="odo-cell" data-lead={i < lead ? "true" : "false"} key={i}>{ch}</span>,
     );
   });
 
   const drums = padded.length;
   return (
-    <div className="odo" role="img" style={{ ["--drums" as any]: drums }} aria-label={`${value.toLocaleString("fr-FR")}${unit ? ` ${unit}` : ""}`}>
+    <div className={`odo${small ? " odo-small" : ""}`} role="img" style={{ ["--drums" as any]: drums }} aria-label={`${value.toLocaleString("fr-FR")}${unit ? ` ${unit}` : ""}`}>
       {cells}
       {unit && <span className="odo-unit" aria-hidden="true">{unit}</span>}
     </div>
