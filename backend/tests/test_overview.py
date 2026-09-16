@@ -84,6 +84,16 @@ def test_models_carry_the_harness_that_ran_them(client, engine):
     assert models["gpt-5.4-codex"] == "codex"
 
 
+def test_each_machine_carries_its_folders_and_harnesses(client, engine):
+    _seed(engine)
+    body = client.get("/api/overview", params={"period": "weekly", "ref": "2026-09-16"}).json()
+    machines = {m["machine"]: m for m in body["by_machine"]}
+    assert machines["brahim-mini"]["projects"] == [{"project": "server", "tokens": 135, "turns": 1}]
+    assert machines["brahim-mini"]["sources"] == [{"source": "claude-code", "tokens": 135, "turns": 1}]
+    # A machine that sent nothing this period still lists, with empty strips.
+    assert machines["sqli-5cd6030lcj"]["sources"] == [{"source": "codex", "tokens": 300, "turns": 1}]
+
+
 def test_overview_rejects_an_unknown_period(client):
     assert client.get("/api/overview", params={"period": "fortnightly"}).status_code == 400
 

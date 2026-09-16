@@ -1,10 +1,11 @@
 import type { Overview } from "../api";
 import Odometer from "../components/Odometer";
-import { RankRows, Sparkline } from "../components/charts";
-import { ago, fmtEur, fmtInt, fmtTok, harness, pct } from "../lib";
+import { MachineDays, MiniRank, RankRows } from "../components/charts";
+import { ago, fmtEur, fmtInt, fmtTok, folderLabel, harness, pct } from "../lib";
 
 /** One meter per machine: its reading for the period, its share of the wall,
- *  the shape of its week, and whether its collector is still reporting. */
+ *  how many tokens it burned each day, what it worked in, and whether its
+ *  collector is still reporting. */
 export default function Machines({ data }: { data: Overview }) {
   const total = data.totals.tokens;
   const rows = [...data.by_machine].sort((a, b) => b.tokens - a.tokens);
@@ -21,6 +22,7 @@ export default function Machines({ data }: { data: Overview }) {
         <div className="meters">
           {live.map((m) => {
             const seen = ago(m.last_seen_at);
+            const topFolder = m.projects[0]?.tokens || 1;
             return (
               <article className="meter" key={m.machine}>
                 <div className="meter-head">
@@ -28,8 +30,41 @@ export default function Machines({ data }: { data: Overview }) {
                   <span className="meter-reading">{fmtTok(m.tokens)}</span>
                 </div>
                 <Odometer value={m.tokens} small digits={9} />
-                <div className="rank-bar"><i style={{ width: `${Math.max(1.5, pct(m.tokens, total))}%`, background: "var(--ink-2)" }} /></div>
-                <Sparkline series={data.series} machine={m.machine} />
+                <div className="rank-bar">
+                  <i style={{ width: `${Math.max(1.5, pct(m.tokens, total))}%`, background: "var(--ink-2)" }} />
+                </div>
+
+                <div>
+                  <div className="card-label">{data.period === "yearly" ? "Tokens by month" : "Tokens by day"}</div>
+                  <MachineDays series={data.series} machine={m.machine} period={data.period} />
+                </div>
+
+                {m.projects.length > 0 && (
+                  <div>
+                    <div className="card-label">Folders</div>
+                    <MiniRank rows={m.projects.map((p) => ({
+                      key: p.project,
+                      name: <span title={p.project}>{folderLabel(p.project)}</span>,
+                      value: fmtTok(p.tokens),
+                      share: pct(p.tokens, topFolder),
+                      fill: "var(--ink-3)",
+                    }))} />
+                  </div>
+                )}
+
+                {m.sources.length > 0 && (
+                  <div>
+                    <div className="card-label">Harnesses</div>
+                    <MiniRank rows={m.sources.map((s) => ({
+                      key: s.source,
+                      name: <span style={{ fontFamily: "var(--read)" }}>{harness(s.source).label}</span>,
+                      value: fmtTok(s.tokens),
+                      share: pct(s.tokens, m.tokens),
+                      fill: harness(s.source).fill,
+                    }))} />
+                  </div>
+                )}
+
                 <div className="meter-foot">
                   <span className="live" data-state={seen.state}>{seen.text}</span>
                   <span>{pct(m.tokens, total).toFixed(0)}% of the period</span>

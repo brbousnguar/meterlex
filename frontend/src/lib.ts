@@ -42,6 +42,14 @@ export const SPLIT: { key: keyof TokenSplit; label: string; fill: string; hint: 
   { key: "reasoning_tokens", label: "Reasoning",   fill: "var(--ramp-4)", hint: "thinking tokens, when the tool reports them" },
 ];
 
+/** Machines that report full paths send `/Users/me/Server/webapps/vitalex`;
+ *  the folder name is what identifies the work, so that is what is shown and
+ *  the whole path stays in the title attribute. */
+export const folderLabel = (project: string) => {
+  const parts = project.split(/[/\\]/).filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : project;
+};
+
 /* ── Periods ──────────────────────────────────────────────────────────────── */
 export const PERIODS: { id: Period; short: string; noun: string }[] = [
   { id: "weekly",  short: "Week",  noun: "this week" },

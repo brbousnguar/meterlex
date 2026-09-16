@@ -144,7 +144,13 @@ export interface GroupRow extends TokenSplit {
 }
 
 export type SourceRow  = GroupRow & { source: string; sub_eur: number; sub_eur_month: number };
-export type MachineRow = GroupRow & { machine: string; last_seen_at: string | null; registered: boolean };
+export type MachineRow = GroupRow & {
+  machine: string;
+  last_seen_at: string | null;
+  registered: boolean;
+  projects: { project: string; tokens: number; turns: number }[];
+  sources: { source: string; tokens: number; turns: number }[];
+};
 export type ModelRowX  = GroupRow & { model_id: string; source: string };
 export type ProjectRowX = GroupRow & { project: string };
 export type OriginRow  = GroupRow & { origin: string };

@@ -529,16 +529,36 @@ def overview(
 
     machines_seen = {m.name: m for m in session.exec(select(Machine)).all()}
 
+    # What each machine worked in, and which tools ran there: the machine screen
+    # answers "533M on what?" without a second request.
+    def per_machine(col, key, empty, limit):
+        out: dict = {}
+        for mach, value, tok, n in session.exec(
+            select(UsageTurn.machine, col, func.sum(UsageTurn.total_tokens), func.count(UsageTurn.id))
+            .where(*base).group_by(UsageTurn.machine, col)
+        ).all():
+            out.setdefault(mach, []).append({key: value or empty, "tokens": int(tok or 0), "turns": int(n)})
+        for rows in out.values():
+            rows.sort(key=lambda r: -r["tokens"])
+            del rows[limit:]
+        return out
+
+    machine_projects = per_machine(UsageTurn.project, "project", "(no folder)", 5)
+    machine_sources = per_machine(UsageTurn.source, "source", "(unknown)", 6)
+
     def with_machine_meta(item):
         m = machines_seen.get(item["machine"])
         item["last_seen_at"] = m.last_seen_at.isoformat() if m and m.last_seen_at else None
         item["registered"] = bool(m)
+        item["projects"] = machine_projects.get(item["machine"], [])
+        item["sources"] = machine_sources.get(item["machine"], [])
 
     by_machine = group(UsageTurn.machine, "machine", "(unknown)", with_machine_meta)
     for name, m in machines_seen.items():    # registered but silent this period
         if not any(r["machine"] == name for r in by_machine):
             by_machine.append({"machine": name, "turns": 0, "tokens": 0, "cost_eur": 0.0,
                                **{c: 0 for c in _TOKEN_COLS}, "models": 0, "registered": True,
+                               "projects": [], "sources": [],
                                "last_seen_at": m.last_seen_at.isoformat() if m.last_seen_at else None})
 
     by_model = group(UsageTurn.model_id, "model_id", "(unknown)")[:14]

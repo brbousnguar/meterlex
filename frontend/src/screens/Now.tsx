@@ -1,7 +1,7 @@
 import type { Overview } from "../api";
 import Odometer from "../components/Odometer";
 import { DayBars, RankRows, SplitBar } from "../components/charts";
-import { bucketFull, change, fmtEur, fmtInt, fmtTok, harness, pct } from "../lib";
+import { bucketFull, change, fmtEur, fmtInt, fmtTok, folderLabel, harness, pct } from "../lib";
 import type { Tab } from "../App";
 
 export default function Now({ data, go }: { data: Overview; go: (t: Tab) => void }) {
@@ -122,7 +122,7 @@ export default function Now({ data, go }: { data: Overview; go: (t: Tab) => void
         </div>
         <RankRows rows={data.by_project.slice(0, 6).map((p) => ({
           key: p.project,
-          name: <span className="mono">{p.project}</span>,
+          name: <span className="mono" title={p.project}>{folderLabel(p.project)}</span>,
           value: fmtTok(p.tokens),
           sub: fmtEur(p.cost_eur),
           share: pct(p.tokens, data.by_project[0]?.tokens || 1),
