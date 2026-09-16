@@ -48,7 +48,7 @@ export default function Harnesses({ data, unit }: { data: Overview; unit: Unit }
                   </div>
                   <div className="stat">
                     <div className="stat-label">Earns</div>
-                    <div className={`stat-value ${ratio && ratio >= 1 ? "under" : "over"}`}>
+                    <div className={`stat-value ${ratio === null ? "" : ratio >= 1 ? "under" : "over"}`}>
                       {ratio === null ? "—" : `${ratio.toFixed(1)}×`}
                     </div>
                     <div className="stat-sub">{ratio === null ? "no fee" : ratio >= 1 ? "worth the fee" : "under-used"}</div>

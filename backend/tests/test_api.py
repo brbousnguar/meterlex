@@ -47,7 +47,7 @@ def test_monthly_summary_includes_usage_and_zero_filled_tools(client, engine):
     assert claude["turns"] == 1
     assert claude["cost_eur"] == 12.5
     assert claude["total_tokens"] == 120
-    assert len(body["tools"]) == 6
+    assert len(body["tools"]) == 7      # every harness, including the silent ones
 
 
 def test_summary_rejects_invalid_period_and_month(client):

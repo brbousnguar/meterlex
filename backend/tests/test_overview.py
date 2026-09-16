@@ -57,7 +57,7 @@ def test_overview_totals_split_tokens_and_compare_with_last_week(client, engine)
 def test_overview_lists_every_harness_machine_and_fills_empty_days(client, engine):
     _seed(engine)
     body = client.get("/api/overview", params={"period": "weekly", "ref": "2026-09-16"}).json()
-    assert len(body["by_source"]) == 6                          # silent harnesses still carry a fee
+    assert len(body["by_source"]) == 7                          # silent harnesses still carry a fee
     machines = {m["machine"]: m for m in body["by_machine"]}
     assert machines["brahim-mini"]["tokens"] == 135
     assert machines["brahim-mini"]["last_seen_at"].startswith("2026-09-15")

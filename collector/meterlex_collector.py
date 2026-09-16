@@ -46,6 +46,7 @@ DEFAULT_PATHS = {
     "antigravity": "~/.gemini/antigravity-cli",
     "gemini_cli": "~/.gemini",
     "copilot": "~/.copilot",
+    "openclaw": "~/.openclaw",
 }
 LABELS = ("full", "basename", "hash")
 FREE_CODEX_PROVIDERS = {"ollama-launch", "ollama-launch-codex-app", "ollama"}
@@ -535,12 +536,85 @@ def read_copilot(root: Path, state: dict, full: bool) -> Iterator[dict]:
                 yield t
 
 
+# ── OpenClaw agents: ~/.openclaw/agents/<id>/agent/openclaw-agent.sqlite ─────
+
+# agent:<id>:<channel>[:<kind>:<address>] — the channel says who started the run.
+OPENCLAW_AUTOMATED = {"cron", "main", "explicit", "heartbeat", "schedule"}
+
+
+def _openclaw_origin(session_key: str) -> str:
+    """A run started by a schedule, by another agent, or by a person in a chat.
+    `main` is the agent's own session, which is where its unattended work runs."""
+    parts = (session_key or "").split(":")
+    channel = parts[2] if len(parts) > 2 else ""
+    if channel in OPENCLAW_AUTOMATED:
+        return "automated"
+    if channel == "agent":
+        return "subagent"
+    return "interactive"
+
+
+def _openclaw_model(provider: str, model_id: str) -> str:
+    """The rate card keys resold models by their host: `ollama/<m>:cloud`,
+    `openrouter/<vendor>/<m>`. A model called by its own vendor keeps its id."""
+    if not model_id:
+        return "unknown"
+    if provider in ("ollama", "openrouter") and not model_id.startswith(f"{provider}/"):
+        return f"{provider}/{model_id}"
+    return model_id
+
+
+def read_openclaw(root: Path, state: dict, full: bool) -> Iterator[dict]:
+    for db in sorted(root.glob("agents/*/agent/openclaw-agent.sqlite")):
+        agent = db.parent.parent.name
+        key = f"oc:{agent}"
+        seen = state["files"].get(key) or {}
+        # created_at is epoch milliseconds; it is the watermark, because the
+        # rows live in a database that rewrites itself, not an append-only log.
+        watermark = 0 if full else int(seen.get("watermark") or 0)
+        try:
+            con = sqlite3.connect(f"file:{db.as_posix()}?mode=ro", uri=True)
+            rows = con.execute(
+                "SELECT created_at, event_json FROM trajectory_runtime_events "
+                "WHERE created_at > ? ORDER BY created_at", (watermark,),
+            ).fetchall()
+        except sqlite3.Error:
+            continue
+        newest = watermark
+        for created_at, blob in rows:
+            newest = max(newest, int(created_at or 0))
+            try:
+                event = json.loads(blob)
+            except (TypeError, ValueError):
+                continue
+            if event.get("type") != "model.completed":
+                continue
+            usage = ((event.get("data") or {}).get("usage")) or {}
+            if not usage:
+                continue
+            yield turn(
+                "openclaw",
+                event.get("sessionId") or agent,
+                f'{event.get("runId") or "run"}:{event.get("seq")}',
+                agent,                      # the agent is the "where" of an agent run
+                _openclaw_model(event.get("provider") or "", event.get("modelId") or ""),
+                _parse_ts(event.get("ts")) or _ms_ts(created_at),
+                inp=_to_int(usage.get("input")), out=_to_int(usage.get("output")),
+                cache_read=_to_int(usage.get("cacheRead")), cache_write=_to_int(usage.get("cacheWrite")),
+                total=_to_int(usage.get("total")) or None,
+                origin=_openclaw_origin(event.get("sessionKey") or ""),
+            )
+        con.close()
+        _mark(state, key, db, 0, watermark=newest)
+
+
 READERS = (
     ("claude_code", read_claude_code),
     ("codex", read_codex),
     ("antigravity", read_antigravity),
     ("gemini_cli", read_gemini_cli),
     ("copilot", read_copilot),
+    ("openclaw", read_openclaw),
 )
 
 

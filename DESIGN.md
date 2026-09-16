@@ -37,6 +37,11 @@ categorical set with the dataviz skill's `validate_palette.js`.
 | Antigravity | `--h-antigravity` | `#0E7B3C` | 5.36:1 | 5.13:1 | **dual-role** |
 | Gemini CLI | `--h-gemini` | `#1B5EC4` | 6.10:1 | 5.84:1 | **dual-role** |
 | Copilot | `--h-copilot` | `#8A5300` | 6.33:1 | 6.06:1 | **dual-role** |
+| OpenClaw | `--h-openclaw` | `#00747F` | 5.52:1 | 5.28:1 | **dual-role** |
+
+The teal sits just under the validator's chroma floor (0.087 against 0.1): a teal
+that clears it at this lightness stops carrying white. It stays because, as below,
+no chart asks colour alone to tell one harness from another.
 
 **Codex is deliberately the one without a hue.** OpenAI's own mark is black, and a
 six-hue categorical set cannot separate every pair under deuteranopia — the validator

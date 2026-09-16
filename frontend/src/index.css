@@ -26,6 +26,7 @@
   --h-antigravity: #0e7b3c;
   --h-gemini:      #1b5ec4;
   --h-copilot:     #8a5300;
+  --h-openclaw:    #00747f;
 
   /* Direction */
   --over:  #c4322b;
@@ -79,6 +80,7 @@
   --h-antigravity-text: #0e7b3c;
   --h-gemini-text:      #1b5ec4;
   --h-copilot-text:     #8a5300;
+  --h-openclaw-text:    #00747f;
 }
 :root[data-theme="dark"] {
   --h-claude-text:      #f0885c;
@@ -87,6 +89,7 @@
   --h-antigravity-text: #4fbf7e;
   --h-gemini-text:      #7fa9f0;
   --h-copilot-text:     #d79a2b;
+  --h-openclaw-text:    #5cc7d6;
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -216,6 +219,16 @@ button.section-note { min-height: 30px; padding: 4px 2px 4px 10px; }
 }
 .odo-cell[data-lead="true"] { color: var(--ink-3); background: var(--paper); }
 .odo-gap { width: 6px; }
+/* Inside a meter card the drums are smaller, and they still size themselves:
+   a ten-digit monthly reading must fit a 320px phone. */
+.odo-small { gap: 2px; }
+.odo-small .odo-cell {
+  /* Each drum also costs its padding, border and gap — about 8px — so that
+     comes off the digit itself, or ten drums overflow a 320px phone. */
+  font-size: min(1.45rem, max(0.6rem, calc((100vw - 90px) / var(--drums) - 8px)));
+  padding: 1px 3px 2px;
+}
+.odo-small .odo-gap { width: 4px; }
 .odo-unit {
   align-self: flex-end; padding-bottom: 8px;
   font-family: var(--mono); font-size: .68rem; letter-spacing: .12em;
