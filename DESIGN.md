@@ -97,7 +97,10 @@ Forms follow the dataviz skill; the decisions worth writing down:
 - **The token split is one 100% bar** (cache read · input · output · cache write ·
   reasoning) in a single-hue sequential ramp, with a 2px surface gap between segments,
   because it is parts of one whole.
-- **Machine sparklines carry no colour** and no axis: they are shape, not measurement.
+- **Each machine gets its own bars, not a sparkline.** A shape with no axis and no
+  numbers cannot answer "how many tokens on Tuesday", which is the question that
+  screen exists for. The bars carry no colour; the busiest one is weighted, and
+  it is named in text underneath so the figure reads without hovering.
 - Every chart has a hover layer, and every figure it shows is also readable as text
   somewhere on the same screen.
 

@@ -1,5 +1,5 @@
 import {
-  Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis, Area, AreaChart,
+  Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
 import type { Bucket, TokenSplit } from "../api";
 import { bucketFull, bucketLabel, fmtEur, fmtInt, fmtTok, harness, pct, SPLIT } from "../lib";
@@ -60,19 +60,64 @@ function BucketTip({ active, payload }: any) {
   );
 }
 
-/** Shape, not measurement: no axes, no colour, no grid. */
-export function Sparkline({ series, machine }: { series: Bucket[]; machine: string }) {
-  const data = series.map((b) => ({ x: b.bucket, v: b.by_machine[machine] ?? 0 }));
-  if (!data.some((d) => d.v > 0)) return <div style={{ height: 34 }} />;
+/** One machine's reading per bucket. This replaced a sparkline: a shape with no
+ *  numbers cannot answer "how many tokens on Tuesday", which is the question
+ *  the machine screen exists for. */
+export function MachineDays({ series, machine, period }: { series: Bucket[]; machine: string; period: string }) {
+  const data = series.map((b) => ({
+    bucket: b.bucket,
+    label: bucketLabel(b.bucket),
+    tokens: b.by_machine[machine] ?? 0,
+  }));
+  const peak = Math.max(...data.map((d) => d.tokens), 0);
+  if (peak === 0) return <p className="rank-sub">Nothing from this machine in the period.</p>;
+  const busiest = data.find((d) => d.tokens === peak)!;
   return (
-    <div style={{ height: 34 }} aria-hidden="true">
-      <ResponsiveContainer width="100%" height="100%">
-        <AreaChart data={data} margin={{ top: 2, right: 0, bottom: 0, left: 0 }}>
-          <Area type="monotone" dataKey="v" stroke="var(--ink-2)" strokeWidth={1.5}
-                fill="var(--surface-2)" isAnimationActive={false} dot={false} />
-        </AreaChart>
-      </ResponsiveContainer>
+    <>
+      <div style={{ height: 94, margin: "0 -4px" }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={data} margin={{ top: 4, right: 4, bottom: 0, left: 4 }}
+                    barCategoryGap={period === "yearly" ? 5 : 3}>
+            <XAxis dataKey="label" tickLine={false} axisLine={false} tick={TICK}
+                   interval="preserveStartEnd" minTickGap={10} />
+            <Tooltip cursor={{ fill: "var(--surface-2)" }} content={<DayTip />} />
+            <Bar dataKey="tokens" isAnimationActive={false}>
+              {data.map((d) => (
+                <Cell key={d.bucket} fill={d.tokens === peak ? "var(--ink)" : "var(--ink-3)"} />
+              ))}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+      <p className="rank-sub">busiest {bucketFull(busiest.bucket)} · {fmtTok(peak)}</p>
+    </>
+  );
+}
+
+function DayTip({ active, payload }: any) {
+  if (!active || !payload?.length) return null;
+  const d = payload[0].payload;
+  return (
+    <div className="tip">
+      <div className="tip-head">{bucketFull(d.bucket)}</div>
+      <div className="tip-row">{fmtInt(d.tokens)} tokens</div>
     </div>
+  );
+}
+
+/** A ranked strip inside a card: name, figure, and a hairline bar. */
+export function MiniRank({ rows }: { rows: { key: string; name: React.ReactNode; value: string; share: number; fill: string }[] }) {
+  if (!rows.length) return null;
+  return (
+    <ul className="mini-rank">
+      {rows.map((r) => (
+        <li key={r.key}>
+          <span className="mini-name">{r.name}</span>
+          <span className="mini-value">{r.value}</span>
+          <i className="mini-bar"><i style={{ width: `${Math.max(2, r.share)}%`, background: r.fill }} /></i>
+        </li>
+      ))}
+    </ul>
   );
 }
 
