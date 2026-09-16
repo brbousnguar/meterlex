@@ -99,7 +99,7 @@ Docker Compose automatically reads `.env` from the repository root.
 | `HUB_MACHINE` | The machine name for history stored before collectors reported per machine: use the name the hub machine's own collector reports under |
 | `LOCAL_TZ` | The zone periods are counted in (default `Europe/Paris`). A week starts Monday 00:00 there and a day at local midnight; rows stay stored in UTC |
 | `PRICES_URL` | Where the model-prices app is reachable from a browser. The Prices link on the More screen points there; leave empty to hide it |
-| `OPENCLAW_SPEND_URL` | Where the openclaw-spend app is reachable, for per-agent and per-session detail. The More screen links there; leave empty to hide it |
+| `OPENCLAW_SPEND_URL` | Where [Clawlex](https://github.com/brbousnguar/clawlex) is reachable, for per-agent and per-run detail. The More screen links there; leave empty to hide it |
 
 The hub reads no session logs itself: every machine, the hub's own included,
 runs the collector. To reach the hub from other machines, keep it off the
