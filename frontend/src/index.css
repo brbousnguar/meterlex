@@ -224,6 +224,16 @@ button.section-note { min-height: 30px; padding: 4px 2px 4px 10px; }
 .odo-dot { align-self: flex-end; width: .42rem; height: .42rem; margin: 0 2px .7rem; background: var(--ink-3); }
 .odo-small .odo-dot { width: .22rem; height: .22rem; margin-bottom: .34rem; }
 .odo-gap { width: 6px; }
+/* The unit plate: the drum worth a thousand, a million or a billion carries its letter. */
+.odo-cell { position: relative; }
+.odo[data-plate="true"] { margin-bottom: 26px; }
+.odo-cell[data-scale]::after {
+  content: attr(data-scale); position: absolute; top: 100%; left: 0; right: 0;
+  margin-top: 3px; text-align: center;
+  font-family: var(--mono); font-size: .62rem; letter-spacing: .08em; color: var(--ink-3);
+}
+.odo-short { display: block; font-family: var(--disp); font-weight: 800; font-size: 1.5rem; letter-spacing: -.02em; color: var(--ink); }
+.odo-small .odo-short { font-size: .95rem; }
 /* Inside a meter card the drums are smaller, and they still size themselves:
    a ten-digit monthly reading must fit a 320px phone. */
 .odo-small { gap: 2px; }

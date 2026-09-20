@@ -33,7 +33,7 @@ export default function Machines({ data, unit }: { data: Overview; unit: Unit })
                 </div>
                 {unit === "money"
                   ? <Odometer value={Math.round(m.cost_eur)} small digits={moneyDrums(m.cost_eur)} />
-                  : <Odometer value={m.tokens} small digits={9} />}
+                  : <Odometer value={m.tokens} small digits={9} short={m.tokens >= 1e5 ? fmtTok(m.tokens) : null} />}
                 <div className="rank-bar">
                   <i style={{ width: `${Math.max(1.5, pct(measure(unit, m), total))}%`, background: "var(--ink-2)" }} />
                 </div>
