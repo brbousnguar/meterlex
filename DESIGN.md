@@ -78,6 +78,10 @@ dark ground, so its dark fill is `#55677A` (5.82:1 under white).
    its own hairline cell like the drum of a gas meter. It is not ornament — it is what
    makes a 9-digit number readable at a glance. In euros it keeps two cent drums in `--ink-3`
    after a square decimal point, because a reading of €0,86 must not round to 1.
+   A meter also carries a **unit plate**: the drum worth a thousand, a million or a billion is
+   marked `K` / `M` / `B` underneath, and the rounded reading (`2.28B`) sits above the unit word —
+   ten drums tell you the exact count but not, at a glance, its size. Money gets neither: nobody
+   reads €1 460 as 1.4K, and the label above the reading already gives the figure.
 
 ## Type
 
