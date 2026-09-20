@@ -19,14 +19,14 @@ export default function Now({ data, unit, go }: { data: Overview; unit: Unit; go
     <>
       <section className="reading">
         {/* The header already names the period; this is the reading itself. */}
+        {/* The size of the reading is said here, in both units, so the drums stand alone. */}
         <div className="reading-label">
-          {money ? `${fmtEur(t.cost_eur)} at list price, ` : ""}
+          {money ? `${fmtEur(t.cost_eur)} at list price, ` : `${fmtTok(t.tokens)} tokens, `}
           metered on {t.machines || "no"} machine{t.machines === 1 ? "" : "s"}
         </div>
         {money
           ? <Odometer value={t.cost_eur} unit="euros" digits={moneyDrums(t.cost_eur)} cents />
-          : <Odometer value={t.tokens} unit="tokens" digits={data.period === "weekly" ? 9 : 10}
-                      short={t.tokens >= 1e5 ? fmtTok(t.tokens) : null} />}
+          : <Odometer value={t.tokens} unit="tokens" digits={data.period === "weekly" ? 9 : 10} />}
         <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
           {delta !== null && (
             <span className="delta" data-dir={delta >= 0 ? "up" : "down"}>
