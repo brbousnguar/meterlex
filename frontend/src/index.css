@@ -33,6 +33,7 @@
   --under: #0e7b3c;
 
   /* The token-split ramp: one hue, light to dark (parts of one whole) */
+  --tile-none: #55514a;   /* white on it: 6.4:1 — a folder whose harness is unknown */
   --ramp-1: #d9d3c2;
   --ramp-2: #b3a98f;
   --ramp-3: #8c8067;
@@ -64,6 +65,7 @@
   --over:  #f2705f;
   --under: #4fbf7e;
 
+  --tile-none: #3b414b;   /* white on it: 8.4:1 */
   --ramp-1: #3b414b;
   --ramp-2: #565f6c;
   --ramp-3: #737d8c;
@@ -218,6 +220,9 @@ button.section-note { min-height: 30px; padding: 4px 2px 4px 10px; }
   line-height: 1.05;
 }
 .odo-cell[data-lead="true"] { color: var(--ink-3); background: var(--paper); }
+.odo-cell[data-cents="true"] { color: var(--ink-3); background: var(--paper); }
+.odo-dot { align-self: flex-end; width: .42rem; height: .42rem; margin: 0 2px .7rem; background: var(--ink-3); }
+.odo-small .odo-dot { width: .22rem; height: .22rem; margin-bottom: .34rem; }
 .odo-gap { width: 6px; }
 /* Inside a meter card the drums are smaller, and they still size themselves:
    a ten-digit monthly reading must fit a 320px phone. */
@@ -360,9 +365,59 @@ button.section-note { min-height: 30px; padding: 4px 2px 4px 10px; }
 .empty { padding: 26px 0; color: var(--ink-3); font-size: .88rem; }
 .err { color: var(--over); font-size: .84rem; padding: 10px 0; }
 
-/* Recharts: recessive axes, no default grid weight. */
-.recharts-cartesian-axis-tick text { fill: var(--ink-3); font-family: var(--mono); font-size: 10px; }
-.recharts-cartesian-grid line { stroke: var(--grid); }
+/* ── Bars: one series, the busiest in ink; the plot is the hit target ────── */
+.bars { position: relative; }
+.bars-body { position: relative; margin-left: 50px; }
+.bars-plot { position: relative; display: flex; align-items: flex-end; gap: 3px; touch-action: pan-y; cursor: default; }
+.bars-plot:focus-visible { outline: 2px solid var(--h-claude); outline-offset: 4px; }
+.bars-grid { position: absolute; inset: 0; pointer-events: none; }
+.bars-grid div { position: absolute; left: 0; right: 0; border-top: 1px solid var(--grid); }
+.bars-grid div[data-zero] { border-top-color: var(--rule); }
+.bars-grid span {
+  position: absolute; right: calc(100% + 8px); transform: translateY(-50%);
+  font-family: var(--mono); font-size: .62rem; color: var(--ink-3); white-space: nowrap;
+}
+.bars-col { position: relative; flex: 1; min-width: 0; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; }
+.bars-col i { display: block; width: 100%; background: var(--ink-3); }
+.bars-col i[data-peak="true"] { background: var(--ink); }
+.bars-col i[data-empty="true"] { height: 2px; background: var(--rule); }
+.bars-col[data-picked="true"] { box-shadow: inset 0 -3px 0 var(--h-claude); }
+.bars-col[data-picked="true"] i:not([data-peak="true"]):not([data-empty="true"]) { background: var(--ink-2); }
+.bars-axis { display: flex; gap: 3px; margin-top: 6px; }
+.bars-axis span {
+  flex: 1; min-width: 0; display: flex; justify-content: center;
+  font-family: var(--mono); font-size: .62rem; color: var(--ink-3); white-space: nowrap;
+}
+.readout {
+  position: absolute; top: 0; left: 0; width: 240px; z-index: 3;
+  background: var(--paper); border: 1px solid var(--ink); padding: 9px 11px;
+  font-size: .8rem; pointer-events: none;
+}
+.ro-when { font-family: var(--disp); font-weight: 700; font-size: .84rem; }
+.ro-value { font-family: var(--disp); font-weight: 800; font-size: 1.35rem; font-variant-numeric: tabular-nums; line-height: 1.15; margin-top: 2px; }
+.ro-line { color: var(--ink-2); }
+.ro-line b { font-family: var(--disp); color: var(--ink); font-variant-numeric: tabular-nums; }
+.ro-empty { color: var(--ink-3); margin-top: 4px; }
+.ro-list { list-style: none; margin-top: 7px; display: grid; gap: 3px; border-top: 1px solid var(--rule); padding-top: 6px; }
+.ro-list li { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; gap: 7px; align-items: center; }
+.ro-list li.ro-sub { grid-template-columns: minmax(0, 1fr) auto; }
+.ro-name { font-family: var(--mono); font-size: .72rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ro-val { font-family: var(--disp); font-weight: 600; font-variant-numeric: tabular-nums; }
+.sw { display: inline-block; width: 10px; height: 10px; flex-shrink: 0; }
+
+/* ── The folder map: area is the reading, colour is the harness ──────────── */
+.tmap { position: relative; width: 100%; }
+.tile {
+  position: absolute; overflow: hidden; padding: 6px 8px; color: #fff;
+  display: flex; flex-direction: column; gap: 1px;
+}
+.tile .k { font-family: var(--mono); font-size: .72rem; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tile .v { font-family: var(--disp); font-weight: 700; font-size: .92rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tile[data-size="l"] .v { font-size: 1.6rem; letter-spacing: -.02em; }
+.tile[data-size="m"] .v { font-size: 1.1rem; }
+.tile[data-size="xs"] .k { display: none; }
+.tip.tip-float { position: fixed; z-index: 60; pointer-events: none; }
+
 .tip {
   background: var(--paper); border: 1px solid var(--ink); padding: 9px 11px;
   font-size: .8rem; min-width: 150px;
@@ -397,4 +452,8 @@ button.section-note { min-height: 30px; padding: 4px 2px 4px 10px; }
 }
 @media (prefers-reduced-motion: no-preference) {
   .odo-cell { transition: color .18s ease; }
+}
+
+@media (max-width: 719px) {
+  .readout { position: static; width: auto; margin-bottom: 10px; min-height: 132px; }
 }

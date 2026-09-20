@@ -570,7 +570,27 @@ def overview(
                                "last_seen_at": m.last_seen_at.isoformat() if m.last_seen_at else None})
 
     by_model = group(UsageTurn.model_id, "model_id", "(unknown)")[:14]
-    by_project = group(UsageTurn.project, "project", "(no folder)")[:10]
+
+    # Which harnesses worked in each folder, so a folder can carry the colour of
+    # the one that did most of the work there (colour is harness identity, always).
+    project_sources: dict = {}
+    for proj, src, tok, n, eur in session.exec(
+        select(UsageTurn.project, UsageTurn.source, func.sum(UsageTurn.total_tokens),
+               func.count(UsageTurn.id), func.sum(UsageTurn.cost_eur))
+        .where(*base).group_by(UsageTurn.project, UsageTurn.source)
+    ).all():
+        project_sources.setdefault(proj or "(no folder)", []).append({
+            "source": src or "(unknown)", "tokens": int(tok or 0), "turns": int(n),
+            "cost_eur": round(eur or 0, 4),
+        })
+    for slices in project_sources.values():
+        slices.sort(key=lambda r: -r["tokens"])
+        del slices[4:]
+
+    def with_sources(item):
+        item["sources"] = project_sources.get(item["project"], [])
+
+    by_project = group(UsageTurn.project, "project", "(no folder)", with_sources)[:20]
     by_origin = group(UsageTurn.origin, "origin", "(unrecorded)")
 
     # Which harness each model ran under, so a model row can carry its colour.
@@ -583,8 +603,8 @@ def overview(
     # Series, bucketed by local day (month over a year).
     hour = func.strftime("%Y-%m-%d %H", UsageTurn.ts)
     series = {b: {"bucket": b, "tokens": 0, "turns": 0, "cost_eur": 0.0,
-                  "by_source": {}, "by_machine": {},
-                  "cost_by_source": {}, "cost_by_machine": {}}
+                  "by_source": {}, "by_machine": {}, "by_model": {},
+                  "cost_by_source": {}, "cost_by_machine": {}, "cost_by_model": {}}
               for b in _buckets_for(period, start, end)}
     for h, src, mach, n, tok, eur in session.exec(
         select(hour, UsageTurn.source, UsageTurn.machine, func.count(UsageTurn.id),
@@ -606,6 +626,19 @@ def overview(
         eur = round(eur or 0, 4)
         e["cost_by_source"][src] = round(e["cost_by_source"].get(src, 0) + eur, 4)
         e["cost_by_machine"][mach] = round(e["cost_by_machine"].get(mach, 0) + eur, 4)
+
+    # The models behind each bucket, so the chart's readout can name them.
+    for h, model, tok, eur in session.exec(
+        select(hour, UsageTurn.model_id, func.sum(UsageTurn.total_tokens), func.sum(UsageTurn.cost_eur))
+        .where(*base).group_by(hour, UsageTurn.model_id)
+    ).all():
+        e = series.get(_bucket_key(h, period))
+        if e is None:
+            continue
+        name = model or "(unknown)"
+        e["by_model"][name] = e["by_model"].get(name, 0) + int(tok or 0)
+        e["cost_by_model"][name] = round(e["cost_by_model"].get(name, 0) + (eur or 0), 4)
+
     series = [series[b] for b in sorted(series)]
     busiest = max(series, key=lambda b: b["tokens"], default=None)
 

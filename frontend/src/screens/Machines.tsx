@@ -42,7 +42,7 @@ export default function Machines({ data, unit }: { data: Overview; unit: Unit })
                   <div className="card-label">
                     {unit === "money" ? "Cost" : "Tokens"} by {data.period === "yearly" ? "month" : "day"}
                   </div>
-                  <MachineDays series={data.series} machine={m.machine} period={data.period} unit={unit} />
+                  <MachineDays series={data.series} machine={m.machine} unit={unit} />
                 </div>
 
                 {folders.length > 0 && (

@@ -104,6 +104,22 @@ def test_series_buckets_carry_money_as_well_as_tokens(client, engine):
     assert tuesday["by_machine"] == {"brahim-mini": 135}
     assert tuesday["cost_by_machine"] == {"brahim-mini": 1.5}
     assert tuesday["cost_by_source"] == {"claude-code": 1.5}
+    # The chart's readout names the models of the bucket it is describing.
+    assert tuesday["by_model"] == {"claude-opus-5": 135}
+    assert tuesday["cost_by_model"] == {"claude-opus-5": 1.5}
+    wednesday = next(b for b in body["series"] if b["bucket"] == "2026-09-16")
+    assert wednesday["by_model"] == {"gpt-5.4-codex": 300}
+
+
+def test_folders_carry_the_harness_that_worked_there(client, engine):
+    """The folder map paints each tile with the harness that did most of the work."""
+    _seed(engine)
+    body = client.get("/api/overview", params={"period": "weekly", "ref": "2026-09-16"}).json()
+    folders = {p["project"]: p for p in body["by_project"]}
+    assert folders["server"]["sources"] == [
+        {"source": "claude-code", "tokens": 135, "turns": 1, "cost_eur": 1.5}]
+    assert folders["(no folder)"]["sources"] == [
+        {"source": "codex", "tokens": 300, "turns": 1, "cost_eur": 0.5}]
 
 
 def test_overview_rejects_an_unknown_period(client):
