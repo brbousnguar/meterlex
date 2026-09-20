@@ -95,13 +95,20 @@ is routed to Display automatically.
 
 Forms follow the dataviz skill; the decisions worth writing down:
 
-- **Tokens per day is one series, not six** — but it is not grey. Each bar takes the colour of the
-  harness that did most of that bucket's work, the same rule the folder map follows, and the
-  busiest bar stays ink so weight still answers "when". A six-colour *stack* is what fails CVD
-  separation; one colour per bar, direct-labelled in the readout, does not.
+- **Tokens per day is stacked by harness.** One colour per bar hid the mix — Claude Code leads
+  almost every day, so a month read as one colour. The bar is now split, in one order for the whole
+  period so a colour keeps its place, with 2px of ground between parts. Nothing depends on telling
+  two hues apart: every part is named in the readout and in the legend under the chart.
+- **A part is its own target.** Which part the pointer is on is worked out from its height in the
+  stack, not from the element under it — a harness with 1% of a bar is a 2px band no pointer can
+  enter. Focusing one part keeps its colour, outlines it, and recedes every other part in every
+  bar; the legend focuses the same way and pins on a tap. ↑ ↓ walk the parts, Esc clears.
 - **A small multiple keeps its readout above the plot.** Over 94px of bars a floating box covers
   what it describes, so the machine cards print one line — bucket, reading, the other unit — over
   their chart.
+- **The readout belongs to the pointer.** It appears while the chart is being read — pointer on the
+  plot, or keyboard focus — and leaves with it, so it never sits over the bars on its own. A finger
+  lifting is not a departure. On a phone it is a panel above the plot and always shown.
 - **The plot is the hit target.** Pointing anywhere on the chart picks the bar under the pointer;
   its readout gives the reading, the other unit, the replies, the harness split (with swatches)
   and its top three models. On a desktop the readout floats beside the selected column and flips
