@@ -6,9 +6,16 @@ import { bucketFull, bucketLabel, fmtEur, fmtInt, fmtTok, harness, pct, SPLIT, t
    the models live in the readout, because a six-colour stack fails CVD separation and answers a
    question that does not need colour. */
 
+/** The harness that did most of a bucket's work — the bar wears its colour. */
+const leader = (b: Bucket) => {
+  const [top] = Object.entries(b.by_source).sort((x, y) => y[1] - x[1]);
+  return top ? harness(top[0]).fill : "var(--ink-3)";
+};
+
 export function DayBars({ series, unit }: { series: Bucket[]; unit: Unit }) {
   const money = unit === "money";
   const points: BarPoint[] = series.map((b) => ({
+    fill: leader(b),
     key: b.bucket,
     label: bucketLabel(b.bucket),
     title: bucketFull(b.bucket),
@@ -26,23 +33,27 @@ export function DayBars({ series, unit }: { series: Bucket[]; unit: Unit }) {
 
 /** One machine's reading per bucket. This replaced a sparkline: a shape with no numbers cannot
  *  answer "how many tokens on Tuesday", which is the question the machine screen exists for. */
-export function MachineDays({ series, machine, unit }: { series: Bucket[]; machine: string; unit: Unit }) {
+export function MachineDays({ series, machine, unit, fill }: {
+  series: Bucket[]; machine: string; unit: Unit;
+  /** The harness this machine mostly runs — its bars wear that colour. */
+  fill?: string;
+}) {
   const money = unit === "money";
   const points: BarPoint[] = series.map((b) => ({
+    fill,
     key: b.bucket,
     label: bucketLabel(b.bucket),
     title: bucketFull(b.bucket),
     value: money ? (b.cost_by_machine[machine] ?? 0) : (b.by_machine[machine] ?? 0),
     tokens: b.by_machine[machine] ?? 0,
     cost_eur: b.cost_by_machine[machine] ?? 0,
-    turns: 0,
   }));
   const peak = Math.max(...points.map((p) => p.value), 0);
   if (peak === 0) return <p className="rank-sub">Nothing from this machine in the period.</p>;
   const busiest = points.find((p) => p.value === peak)!;
   return (
     <>
-      <Bars points={points} unit={unit} height={94} axis={false} />
+      <Bars points={points} unit={unit} height={94} axis={false} compact />
       <p className="rank-sub">
         busiest {busiest.title} · {money ? fmtEur(peak) : fmtTok(peak)}
       </p>

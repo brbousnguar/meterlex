@@ -67,11 +67,11 @@ export const fmtMeasure = (unit: Unit, row: { tokens: number; cost_eur: number }
 
 /* ── The token split, in the order it is always shown ─────────────────────── */
 export const SPLIT: { key: keyof TokenSplit; label: string; fill: string; hint: string }[] = [
-  { key: "cache_read",       label: "Cache read",  fill: "var(--ramp-1)", hint: "context replayed from cache — cheap, and most of the volume" },
+  { key: "cache_read",       label: "Cache read",  fill: "var(--ramp-3)", hint: "context replayed from cache — cheap, and most of the volume" },
   { key: "input_tokens",     label: "Input",       fill: "var(--ramp-2)", hint: "new prompt tokens sent" },
   { key: "output_tokens",    label: "Output",      fill: "var(--ramp-5)", hint: "what the model wrote back" },
-  { key: "cache_write",      label: "Cache write", fill: "var(--ramp-3)", hint: "context stored for reuse" },
-  { key: "reasoning_tokens", label: "Reasoning",   fill: "var(--ramp-4)", hint: "thinking tokens, when the tool reports them" },
+  { key: "cache_write",      label: "Cache write", fill: "var(--ramp-4)", hint: "context stored for reuse" },
+  { key: "reasoning_tokens", label: "Reasoning",   fill: "var(--ramp-1)", hint: "thinking tokens, when the tool reports them" },
 ];
 
 /** Machines that report full paths send `/Users/me/Server/webapps/vitalex`;

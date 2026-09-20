@@ -9,7 +9,10 @@ export type BarPoint = {
   value: number;                 // in the current unit
   tokens: number;
   cost_eur: number;
-  turns: number;
+  /** Replies behind the bucket, when the series carries them. */
+  turns?: number;
+  /** The colour of the harness that owns the bucket; the busiest bar stays ink. */
+  fill?: string;
   /** Harness split — the only parts that carry a colour. */
   parts?: { key: string; label: string; fill: string; value: number }[];
   /** Models behind the bucket: named, never coloured. */
@@ -32,11 +35,13 @@ function niceMax(v: number) {
  * selected column on a desktop and sits above the plot on a phone, so it never covers the bar
  * being read. ← → Home End move between buckets.
  */
-export default function Bars({ points, unit, height = 230, axis = true }: {
+export default function Bars({ points, unit, height = 230, axis = true, compact = false }: {
   points: BarPoint[];
   unit: Unit;
   height?: number;
   axis?: boolean;
+  /** A small multiple: the readout sits above the plot instead of floating over 94px of bars. */
+  compact?: boolean;
 }) {
   const money = unit === "money";
   const top = niceMax(Math.max(...points.map((p) => p.value), 0));
@@ -63,7 +68,7 @@ export default function Bars({ points, unit, height = 230, axis = true }: {
   useLayoutEffect(() => {
     const root = rootRef.current, box = boxRef.current, plot = plotRef.current;
     if (!root || !box || !plot) return;
-    if (window.matchMedia("(max-width: 719px)").matches) { box.style.left = ""; box.style.top = ""; return; }
+    if (compact || window.matchMedia("(max-width: 719px)").matches) { box.style.left = ""; box.style.top = ""; return; }
     const col = plot.querySelectorAll<HTMLElement>(".bars-col")[sel];
     if (!col) return;
     const r = root.getBoundingClientRect(), c = col.getBoundingClientRect(), p = plot.getBoundingClientRect();
@@ -98,13 +103,14 @@ export default function Bars({ points, unit, height = 230, axis = true }: {
 
   return (
     <div className="bars" ref={rootRef}>
-      <div className="readout" aria-live="polite" ref={boxRef}>
+      <div className={`readout${compact ? " readout-inline" : ""}`} aria-live="polite" ref={boxRef}>
         <div className="ro-when">{b.title}</div>
-        {b.value > 0 || b.turns ? (
+        {b.value > 0 ? (
           <>
             <div className="ro-value">{fmtV(b.value)}</div>
             <div className="ro-line">
-              <b>{money ? fmtTok(b.tokens) : fmtEur(b.cost_eur)}</b> · <b>{fmtInt(b.turns)}</b> {b.turns === 1 ? "reply" : "replies"}
+              <b>{money ? fmtTok(b.tokens) : fmtEur(b.cost_eur)}</b>
+              {b.turns != null && <> · <b>{fmtInt(b.turns)}</b> {b.turns === 1 ? "reply" : "replies"}</>}
             </div>
           </>
         ) : <div className="ro-empty">Nothing recorded</div>}
@@ -150,7 +156,8 @@ export default function Bars({ points, unit, height = 230, axis = true }: {
           {points.map((p, i) => (
             <div className="bars-col" key={p.key} data-picked={i === sel ? "true" : "false"}>
               {p.value > 0
-                ? <i data-peak={i === busiest ? "true" : "false"} style={{ height: `${(p.value / top) * 100}%` }} />
+                ? <i data-peak={i === busiest ? "true" : "false"}
+                     style={{ height: `${(p.value / top) * 100}%`, background: i === busiest ? undefined : p.fill }} />
                 : <i data-empty="true" />}
             </div>
           ))}

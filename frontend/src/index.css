@@ -188,17 +188,17 @@ h1, h2, h3, .fig, [data-fig] {
 .step:disabled { opacity: .35; cursor: default; }
 
 /* ── Content ────────────────────────────────────────────────────────────── */
-.content { flex: 1; padding: 16px 16px 28px; max-width: 1080px; width: 100%; margin: 0 auto; }
+.content { flex: 1; padding: 16px 16px 28px; max-width: 1200px; width: 100%; margin: 0 auto; }
 .section { margin-top: 26px; }
 .section-head {
   display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px;
   border-bottom: 1px solid var(--rule); padding-bottom: 6px;
 }
 .section-title {
-  font-family: var(--disp); font-weight: 700; font-size: .78rem;
+  font-family: var(--disp); font-weight: 700; font-size: .84rem;
   letter-spacing: .14em; text-transform: uppercase;
 }
-.section-note { margin-left: auto; font-size: .76rem; color: var(--ink-3); }
+.section-note { margin-left: auto; font-size: .78rem; color: var(--ink-2); }
 /* A "see all" note is still a tap target (WCAG 2.5.8). */
 button.section-note { min-height: 30px; padding: 4px 2px 4px 10px; }
 
@@ -254,8 +254,8 @@ button.section-note { min-height: 30px; padding: 4px 2px 4px 10px; }
   font-family: var(--mono); font-size: .6rem; letter-spacing: .12em;
   text-transform: uppercase; color: var(--ink-3);
 }
-.stat-value { font-family: var(--disp); font-weight: 700; font-size: 1.5rem; margin-top: 3px; font-variant-numeric: tabular-nums; }
-.stat-sub { font-size: .74rem; color: var(--ink-3); margin-top: 2px; }
+.stat-value { font-family: var(--disp); font-weight: 700; font-size: 1.7rem; margin-top: 3px; font-variant-numeric: tabular-nums; }
+.stat-sub { font-size: .78rem; color: var(--ink-2); margin-top: 3px; }
 .stat-value.over { color: var(--over); }
 .stat-value.under { color: var(--under); }
 
@@ -279,8 +279,8 @@ button.section-note { min-height: 30px; padding: 4px 2px 4px 10px; }
 .rank-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .rank-name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dot { width: 10px; height: 10px; flex-shrink: 0; }
-.rank-value { font-family: var(--disp); font-weight: 700; font-variant-numeric: tabular-nums; }
-.rank-sub { font-size: .74rem; color: var(--ink-3); }
+.rank-value { font-family: var(--disp); font-weight: 700; font-size: 1.05rem; font-variant-numeric: tabular-nums; }
+.rank-sub { font-size: .78rem; color: var(--ink-2); }
 .rank-bar { grid-column: 1 / -1; height: 6px; background: var(--surface-2); }
 .rank-bar i { display: block; height: 100%; }
 
@@ -313,7 +313,7 @@ button.section-note { min-height: 30px; padding: 4px 2px 4px 10px; }
 .mini-rank { list-style: none; display: grid; gap: 7px; }
 .mini-rank li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; align-items: baseline; }
 .mini-name {
-  font-family: var(--mono); font-size: .76rem; min-width: 0;
+  font-family: var(--mono); font-size: .78rem; min-width: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .mini-value { font-family: var(--disp); font-weight: 600; font-size: .8rem; font-variant-numeric: tabular-nums; }
@@ -429,12 +429,12 @@ button.section-note { min-height: 30px; padding: 4px 2px 4px 10px; }
 @media (min-width: 720px) {
   :root { --tabs-h: 0px; }
   /* The header, the tabs and the content share one measure. */
-  .topbar > * { max-width: 1080px; margin: 0 auto; width: 100%; }
+  .topbar > * { max-width: 1200px; margin: 0 auto; width: 100%; }
   .app { padding-bottom: 0; }
   .tabs {
     position: static; border-top: 0; border-bottom: 1px solid var(--rule);
     grid-auto-flow: column; grid-auto-columns: max-content; justify-content: start;
-    gap: 4px; padding: 0 16px; max-width: 1080px; margin: 0 auto; width: 100%;
+    gap: 4px; padding: 0 16px; max-width: 1200px; margin: 0 auto; width: 100%;
   }
   .tab {
     flex-direction: row; gap: 8px; min-height: 44px; padding: 0 14px;
@@ -456,4 +456,26 @@ button.section-note { min-height: 30px; padding: 4px 2px 4px 10px; }
 
 @media (max-width: 719px) {
   .readout { position: static; width: auto; margin-bottom: 10px; min-height: 132px; }
+}
+
+/* A small multiple's readout sits above its 94px of bars, never over them. */
+.readout-inline {
+  position: static; width: auto; margin: 0 0 6px; padding: 5px 8px;
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+}
+.readout-inline .ro-value { font-size: 1rem; margin: 0; }
+.readout-inline .ro-when { font-size: .76rem; color: var(--ink-2); }
+@media (max-width: 719px) { .readout-inline { min-height: 0; } }
+
+/* ── The Now screen on a desktop: two columns, so the screen is read at once ──
+   The reading, its rail and the chart stay full width; below them the folder map
+   sits beside the harness and machine readings. A phone keeps one column. */
+@media (min-width: 1000px) {
+  .cols2 { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 0 34px; align-items: start; }
+  .cols2 > * { min-width: 0; }
+  /* The map is the tall one: it takes the left column beside both readings.
+     The order in the markup is the phone's order and stays as it is. */
+  .cols2 > :nth-child(1), .cols2 > :nth-child(2) { grid-column: 2; }
+  .cols2 > :nth-child(3) { grid-column: 1; grid-row: 1 / span 2; }
+  .rail { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
