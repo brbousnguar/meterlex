@@ -109,6 +109,7 @@ export default function Now({ data, unit, go }: { data: Overview; unit: Unit; go
         <SplitBar split={t} total={t.tokens} />
       </section>
 
+      <div className="cols2">
       <section className="section">
         <div className="section-head">
           <h2 className="section-title">Harnesses</h2>
@@ -173,10 +174,11 @@ export default function Now({ data, unit, go }: { data: Overview; unit: Unit; go
           value: fmtMeasure(unit, p),
           sub: money ? fmtTok(p.tokens) : fmtEur(p.cost_eur),
           share: pct(measure(unit, p), measure(unit, byMeasure(unit, data.by_project)[0] ?? p)),
-          fill: "var(--ink-3)",
+          fill: harness([...(p.sources ?? [])].sort((a, b) => b.tokens - a.tokens)[0]?.source ?? "").fill,
           parts: (p.sources ?? []).map((s) => ({ value: measure(unit, s), fill: harness(s.source).fill })),
         }))} />
       </section>
+      </div>
     </>
   );
 }

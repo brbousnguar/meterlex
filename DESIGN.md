@@ -95,9 +95,13 @@ is routed to Display automatically.
 
 Forms follow the dataviz skill; the decisions worth writing down:
 
-- **Tokens per day is one series, not six.** A single-hue bar per bucket, the busiest in ink.
-  A six-colour stack fails CVD separation and answers a question ("how much today") that does
-  not need colour at all.
+- **Tokens per day is one series, not six** — but it is not grey. Each bar takes the colour of the
+  harness that did most of that bucket's work, the same rule the folder map follows, and the
+  busiest bar stays ink so weight still answers "when". A six-colour *stack* is what fails CVD
+  separation; one colour per bar, direct-labelled in the readout, does not.
+- **A small multiple keeps its readout above the plot.** Over 94px of bars a floating box covers
+  what it describes, so the machine cards print one line — bucket, reading, the other unit — over
+  their chart.
 - **The plot is the hit target.** Pointing anywhere on the chart picks the bar under the pointer;
   its readout gives the reading, the other unit, the replies, the harness split (with swatches)
   and its top three models. On a desktop the readout floats beside the selected column and flips
@@ -121,6 +125,15 @@ Forms follow the dataviz skill; the decisions worth writing down:
   it is named in text underneath so the figure reads without hovering.
 - Every chart has a hover layer, and every figure it shows is also readable as text
   somewhere on the same screen.
+
+## Layout
+
+One column on a phone. From 1000px the Now screen splits: the reading, its rail and the chart run
+the full width, then the folder map takes the left column beside the harness and machine readings,
+with the folder list under the map. The measure is 1200px, not 1080, because two columns need it.
+
+Sub-lines and section notes are `--ink-2`, not `--ink-3`: the lightest ink is for axis ticks and
+disabled things, and a screen whose every second line whispers reads as faded.
 
 ## Units
 
