@@ -1,114 +1,52 @@
-import {
-  Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis,
-} from "recharts";
 import type { Bucket, TokenSplit } from "../api";
-import { bucketFull, bucketLabel, fmtEur, fmtEurShort, fmtInt, fmtTok, harness, pct, SPLIT, type Unit } from "../lib";
+import Bars, { type BarPoint } from "./Bars";
+import { bucketFull, bucketLabel, fmtEur, fmtInt, fmtTok, harness, pct, SPLIT, type Unit } from "../lib";
 
-/* Recharts writes the tick colour as an SVG attribute, which the stylesheet
-   cannot override — so the axes carry it as a prop. */
-const TICK = { fill: "var(--ink-3)", fontFamily: "var(--mono)", fontSize: 10 };
+/* Forms follow DESIGN.md → Charts. The reading over time is ONE series: the harness split and
+   the models live in the readout, because a six-colour stack fails CVD separation and answers a
+   question that does not need colour. */
 
-/* Forms follow DESIGN.md → Charts. Tokens per bucket is ONE series: the harness
-   split lives in the tooltip, because a six-colour stack fails CVD separation
-   and answers a question that does not need colour. */
-
-export function DayBars({ series, period, unit }: { series: Bucket[]; period: string; unit: Unit }) {
-  const data = series.map((b) => ({ ...b, label: bucketLabel(b.bucket), v: unit === "money" ? b.cost_eur : b.tokens }));
-  const peak = Math.max(...data.map((d) => d.v), 0);
-  return (
-    <div style={{ height: 210, margin: "4px -6px 0" }}>
-      <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={data} margin={{ top: 8, right: 6, bottom: 0, left: 6 }} barCategoryGap={period === "yearly" ? 6 : 3}>
-          <CartesianGrid vertical={false} />
-          <XAxis dataKey="label" tickLine={false} axisLine={false} interval="preserveStartEnd" minTickGap={14}
-                 tick={TICK} />
-          <YAxis width={56} tickLine={false} axisLine={false} tick={TICK}
-                 tickFormatter={(v: number) => (unit === "money" ? fmtEurShort(v) : fmtTok(v))} />
-          <Tooltip cursor={{ fill: "var(--surface-2)" }} content={<BucketTip unit={unit} />} />
-          <Bar dataKey="v" isAnimationActive={false}>
-            {data.map((d) => (
-              /* The busiest bucket is the only one that changes weight: it is
-                 the answer to "when did this happen", not a second series. */
-              <Cell key={d.bucket} fill={d.v === peak && peak > 0 ? "var(--ink)" : "var(--ink-3)"} />
-            ))}
-          </Bar>
-        </BarChart>
-      </ResponsiveContainer>
-    </div>
-  );
-}
-
-function BucketTip({ active, payload, unit }: any) {
-  if (!active || !payload?.length) return null;
-  const b: Bucket = payload[0].payload;
+export function DayBars({ series, unit }: { series: Bucket[]; unit: Unit }) {
   const money = unit === "money";
-  const rows = Object.entries(money ? b.cost_by_source : b.by_source).sort((a, c) => c[1] - a[1]);
-  return (
-    <div className="tip">
-      <div className="tip-head">{bucketFull(b.bucket)}</div>
-      <div className="tip-row">{fmtInt(b.tokens)} tokens <span>{fmtEur(b.cost_eur)}</span></div>
-      <div className="tip-row" style={{ color: "var(--ink-3)" }}>{fmtInt(b.turns)} replies</div>
-      {rows.length > 0 && <div style={{ borderTop: "1px solid var(--rule)", margin: "6px 0 5px" }} />}
-      {rows.map(([src, tok]) => (
-        <div className="tip-row" key={src}>
-          <span style={{ marginLeft: 0, display: "inline-flex", alignItems: "center", gap: 6 }}>
-            <i className="dot" style={{ background: harness(src).fill }} /> {harness(src).label}
-          </span>
-          <span>{money ? fmtEur(tok) : fmtTok(tok)}</span>
-        </div>
-      ))}
-    </div>
-  );
+  const points: BarPoint[] = series.map((b) => ({
+    key: b.bucket,
+    label: bucketLabel(b.bucket),
+    title: bucketFull(b.bucket),
+    value: money ? b.cost_eur : b.tokens,
+    tokens: b.tokens,
+    cost_eur: b.cost_eur,
+    turns: b.turns,
+    parts: Object.entries(money ? b.cost_by_source : b.by_source).map(([src, v]) => ({
+      key: src, label: harness(src).label, fill: harness(src).fill, value: v,
+    })),
+    models: Object.entries((money ? b.cost_by_model : b.by_model) ?? {}).map(([m, v]) => ({ key: m, label: m, value: v })),
+  }));
+  return <Bars points={points} unit={unit} />;
 }
 
-/** One machine's reading per bucket. This replaced a sparkline: a shape with no
- *  numbers cannot answer "how many tokens on Tuesday", which is the question
- *  the machine screen exists for. */
-export function MachineDays({ series, machine, period, unit }: {
-  series: Bucket[]; machine: string; period: string; unit: Unit;
-}) {
-  const data = series.map((b) => ({
-    bucket: b.bucket,
+/** One machine's reading per bucket. This replaced a sparkline: a shape with no numbers cannot
+ *  answer "how many tokens on Tuesday", which is the question the machine screen exists for. */
+export function MachineDays({ series, machine, unit }: { series: Bucket[]; machine: string; unit: Unit }) {
+  const money = unit === "money";
+  const points: BarPoint[] = series.map((b) => ({
+    key: b.bucket,
     label: bucketLabel(b.bucket),
+    title: bucketFull(b.bucket),
+    value: money ? (b.cost_by_machine[machine] ?? 0) : (b.by_machine[machine] ?? 0),
     tokens: b.by_machine[machine] ?? 0,
     cost_eur: b.cost_by_machine[machine] ?? 0,
-    v: unit === "money" ? (b.cost_by_machine[machine] ?? 0) : (b.by_machine[machine] ?? 0),
+    turns: 0,
   }));
-  const peak = Math.max(...data.map((d) => d.v), 0);
+  const peak = Math.max(...points.map((p) => p.value), 0);
   if (peak === 0) return <p className="rank-sub">Nothing from this machine in the period.</p>;
-  const busiest = data.find((d) => d.v === peak)!;
+  const busiest = points.find((p) => p.value === peak)!;
   return (
     <>
-      <div style={{ height: 94, margin: "0 -4px" }}>
-        <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={data} margin={{ top: 4, right: 4, bottom: 0, left: 4 }}
-                    barCategoryGap={period === "yearly" ? 5 : 3}>
-            <XAxis dataKey="label" tickLine={false} axisLine={false} tick={TICK}
-                   interval="preserveStartEnd" minTickGap={10} />
-            <Tooltip cursor={{ fill: "var(--surface-2)" }} content={<DayTip />} />
-            <Bar dataKey="v" isAnimationActive={false}>
-              {data.map((d) => (
-                <Cell key={d.bucket} fill={d.v === peak ? "var(--ink)" : "var(--ink-3)"} />
-              ))}
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
+      <Bars points={points} unit={unit} height={94} axis={false} />
       <p className="rank-sub">
-        busiest {bucketFull(busiest.bucket)} · {unit === "money" ? fmtEur(peak) : fmtTok(peak)}
+        busiest {busiest.title} · {money ? fmtEur(peak) : fmtTok(peak)}
       </p>
     </>
-  );
-}
-
-function DayTip({ active, payload }: any) {
-  if (!active || !payload?.length) return null;
-  const d = payload[0].payload;
-  return (
-    <div className="tip">
-      <div className="tip-head">{bucketFull(d.bucket)}</div>
-      <div className="tip-row">{fmtInt(d.tokens)} tokens <span>{fmtEur(d.cost_eur)}</span></div>
-    </div>
   );
 }
 
@@ -153,9 +91,16 @@ export function SplitBar({ split, total }: { split: TokenSplit; total: number })
   );
 }
 
+const sumOf = (parts: { value: number }[]) => parts.reduce((a, p) => a + p.value, 0) || 1;
+
 /** A ranked list. The bar is the comparison; the colour is identity only. */
 export function RankRows({ rows }: {
-  rows: { key: string; name: React.ReactNode; value: string; sub?: string; share: number; fill: string; onClick?: () => void }[];
+  rows: {
+    key: string; name: React.ReactNode; value: string; sub?: string; share: number; fill: string;
+    /** Split the bar by harness, the way the folder map is coloured. */
+    parts?: { value: number; fill: string }[];
+    onClick?: () => void;
+  }[];
 }) {
   if (!rows.length) return <div className="empty">Nothing recorded in this period.</div>;
   return (
@@ -169,7 +114,13 @@ export function RankRows({ rows }: {
               <div className="rank-value">{r.value}</div>
               {r.sub && <div className="rank-sub">{r.sub}</div>}
             </div>
-            <div className="rank-bar"><i style={{ width: `${Math.max(1.5, r.share)}%`, background: r.fill }} /></div>
+            <div className="rank-bar">
+              {r.parts?.length
+                ? r.parts.filter((p) => p.value > 0).map((p, i) => (
+                    <i key={i} style={{ width: `${Math.max(0.5, (p.value / sumOf(r.parts!)) * Math.max(1.5, r.share))}%`, background: p.fill }} />
+                  ))
+                : <i style={{ width: `${Math.max(1.5, r.share)}%`, background: r.fill }} />}
+            </div>
           </Row>
         );
       })}

@@ -5,10 +5,12 @@ import { useEffect, useRef, useState } from "react";
  *  a meter has a fixed number of drums — but drawn in the muted ink so the
  *  significant digits still read first. */
 export default function Odometer({
-  value, unit, digits = 0, small = false,
-}: { value: number; unit?: string; digits?: number; small?: boolean }) {
+  value, unit, digits = 0, small = false, cents = false,
+}: { value: number; unit?: string; digits?: number; small?: boolean; cents?: boolean }) {
   const shown = useCount(value);
-  const text = String(Math.max(0, Math.round(shown)));
+  // Euros keep their cents on two muted drums: a reading of €0,86 must not say 1.
+  const whole = Math.max(0, cents ? Math.floor(shown) : Math.round(shown));
+  const text = String(whole);
   const padded = digits > text.length ? text.padStart(digits, "0") : text;
   const lead = padded.length - text.length;
 
@@ -21,9 +23,18 @@ export default function Odometer({
     );
   });
 
-  const drums = padded.length;
+  if (cents) {
+    cells.push(<i className="odo-dot" key="dot" />);
+    const frac = String(Math.min(99, Math.round((shown - whole) * 100))).padStart(2, "0");
+    [...frac].forEach((ch, i) => cells.push(
+      <span className="odo-cell" data-cents="true" key={`c${i}`}>{ch}</span>,
+    ));
+  }
+
+  const drums = padded.length + (cents ? 2.5 : 0);
+  const spoken = value.toLocaleString("fr-FR", cents ? { minimumFractionDigits: 2, maximumFractionDigits: 2 } : {});
   return (
-    <div className={`odo${small ? " odo-small" : ""}`} role="img" style={{ ["--drums" as any]: drums }} aria-label={`${value.toLocaleString("fr-FR")}${unit ? ` ${unit}` : ""}`}>
+    <div className={`odo${small ? " odo-small" : ""}`} role="img" style={{ ["--drums" as any]: drums }} aria-label={`${spoken}${unit ? ` ${unit}` : ""}`}>
       {cells}
       {unit && <span className="odo-unit" aria-hidden="true">{unit}</span>}
     </div>

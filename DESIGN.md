@@ -76,7 +76,8 @@ dark ground, so its dark fill is `#55677A` (5.82:1 under white).
    do not.
 4. **One decoration, derived from the subject:** the odometer's digit cells, each digit in
    its own hairline cell like the drum of a gas meter. It is not ornament — it is what
-   makes a 9-digit number readable at a glance.
+   makes a 9-digit number readable at a glance. In euros it keeps two cent drums in `--ink-3`
+   after a square decimal point, because a reading of €0,86 must not round to 1.
 
 ## Type
 
@@ -94,14 +95,26 @@ is routed to Display automatically.
 
 Forms follow the dataviz skill; the decisions worth writing down:
 
-- **Tokens per day is one series, not six.** A single-hue bar per bucket, with the harness
-  split in the tooltip. A six-colour stack fails CVD separation and answers a question
-  ("how much today") that does not need colour at all.
+- **Tokens per day is one series, not six.** A single-hue bar per bucket, the busiest in ink.
+  A six-colour stack fails CVD separation and answers a question ("how much today") that does
+  not need colour at all.
+- **The plot is the hit target.** Pointing anywhere on the chart picks the bar under the pointer;
+  its readout gives the reading, the other unit, the replies, the harness split (with swatches)
+  and its top three models. On a desktop the readout floats beside the selected column and flips
+  to its left at the right edge; on a phone (≤719px) it is a panel above the plot, so it never
+  covers the bar being read. The busiest bucket is selected on load and ← → Home End move between
+  buckets. Drawn with plain elements — no chart library.
 - **Harness comparison is a ranked horizontal bar list**, each row direct-labelled and in
   its own colour — identity, not a colour-matching exercise against a legend.
 - **The token split is one 100% bar** (cache read · input · output · cache write ·
   reasoning) in a single-hue sequential ramp, with a 2px surface gap between segments,
   because it is parts of one whole.
+- **Where the work happened is a map.** A squarified treemap of the folders: the area is what the
+  folder read in the current unit, and the tile's colour is the harness that did most of the work
+  there — colour is harness identity here as everywhere else. A folder whose harness is unknown
+  takes `--tile-none` (white on it: 6.4:1 light, 8.4:1 dark). Every tile is also a row in the
+  ranked list underneath, whose bar is split by the same harness colours, so nothing depends on
+  reading the map.
 - **Each machine gets its own bars, not a sparkline.** A shape with no axis and no
   numbers cannot answer "how many tokens on Tuesday", which is the question that
   screen exists for. The bars carry no colour; the busiest one is weighted, and

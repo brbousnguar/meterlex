@@ -48,9 +48,12 @@ host; transcripts never leave the machine that wrote them.
 Four readings and a settings screen, over **this week (Monday start), this month
 or this year** — periods counted in your own time zone, never UTC:
 
-- **Now** — the reading itself: tokens as an odometer, list price against what the
-  subscriptions actually cost over that period, how much the subscriptions earn,
-  the share replayed from cache, tokens per day, and where the work happened.
+- **Now** — the reading itself: tokens (or euros, to the cent) as an odometer, the
+  latest reading from each machine, list price against what the subscriptions
+  actually cost over that period, how much the subscriptions earn, the share
+  replayed from cache, the reading per day — point at any bar for its harness
+  split and its models — and a map of the folders the work happened in, each
+  tile in the colour of the harness that did most of it.
 - **Machines** — one meter per machine: its reading, its share, the shape of its
   period, when its collector last reported, and which machines went silent.
 - **Harnesses** — per tool: tokens, replies, models, list price against its fee,
