@@ -26,13 +26,13 @@ export default function Now({ data, unit, go }: { data: Overview; unit: Unit; go
         </div>
         {money
           ? <Odometer value={t.cost_eur} unit="euros" digits={moneyDrums(t.cost_eur)} cents />
-          : <Odometer value={t.tokens} unit="tokens" digits={data.period === "weekly" ? 9 : 10} />}
+          : <Odometer value={t.tokens} unit="tokens" digits={data.period === "daily" ? 8 : data.period === "weekly" ? 9 : 10} />}
         <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
           {delta !== null && (
             <span className="delta" data-dir={delta >= 0 ? "up" : "down"}>
               {delta >= 0 ? "▲" : "▼"} {Math.abs(delta).toFixed(0)}%
               <span style={{ color: "var(--ink-3)", fontWeight: 500 }}>
-                vs {data.period === "weekly" ? "last week" : data.period === "monthly" ? "last month" : "last year"}
+                vs {data.period === "daily" ? "yesterday" : data.period === "weekly" ? "last week" : data.period === "monthly" ? "last month" : "last year"}
               </span>
             </span>
           )}
@@ -91,7 +91,7 @@ export default function Now({ data, unit, go }: { data: Overview; unit: Unit; go
       <section className="section">
         <div className="section-head">
           <h2 className="section-title">
-            {money ? "Cost" : "Tokens"} by {data.period === "yearly" ? "month" : "day"}
+            {money ? "Cost" : "Tokens"} by {data.period === "yearly" ? "month" : data.period === "daily" ? "hour" : "day"}
           </h2>
           {data.busiest && (
             <div className="section-note">

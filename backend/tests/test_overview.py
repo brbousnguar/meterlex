@@ -111,6 +111,30 @@ def test_series_buckets_carry_money_as_well_as_tokens(client, engine):
     assert wednesday["by_model"] == {"gpt-5.4-codex": 300}
 
 
+def test_daily_period_bounds_are_local_midnight_to_midnight(client, engine):
+    _seed(engine)
+    body = client.get("/api/overview", params={"period": "daily", "ref": "2026-09-15"}).json()
+    assert body["from_local"].startswith("2026-09-15T00:00")
+    assert body["to_local"].startswith("2026-09-16T00:00")
+    # vs yesterday, not vs "the day before the day before"
+    assert body["previous"]["from"] < body["from"]
+    assert (datetime.fromisoformat(body["from"]) - datetime.fromisoformat(body["previous"]["from"])).days == 1
+
+
+def test_daily_series_is_bucketed_by_local_hour(client, engine):
+    """t1 (10:00 UTC) is noon in Paris; the 22:00 UTC turn belongs to the next
+    local day and must not leak into this one."""
+    _seed(engine)
+    body = client.get("/api/overview", params={"period": "daily", "ref": "2026-09-15"}).json()
+    assert len(body["series"]) == 24
+    assert [b["bucket"] for b in body["series"]][0] == "2026-09-15 00"
+    assert [b["bucket"] for b in body["series"]][-1] == "2026-09-15 23"
+    noon = next(b for b in body["series"] if b["bucket"] == "2026-09-15 12")
+    assert noon["tokens"] == 135
+    assert noon["by_machine"] == {"brahim-mini": 135}
+    assert body["totals"]["tokens"] == 135                      # the 22:00 UTC turn is the next local day
+
+
 def test_folders_carry_the_harness_that_worked_there(client, engine):
     """The folder map paints each tile with the harness that did most of the work."""
     _seed(engine)
