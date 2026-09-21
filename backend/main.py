@@ -193,6 +193,29 @@ def api_ingest(payload: dict, authorization: Optional[str] = Header(None),
     return {"machine": machine.name, **result}
 
 
+@app.get("/api/projects/mine")
+def api_my_projects(authorization: Optional[str] = Header(None), session: Session = Depends(get_session)):
+    """The project labels stored for the calling machine (its collector's key)."""
+    machine = machines.authenticate(session, authorization)
+    if machine is None:
+        raise HTTPException(401, "unknown or revoked machine key")
+    return {"machine": machine.name, "projects": ingest.machine_projects(session, machine)}
+
+
+@app.post("/api/projects/rename")
+def api_rename_projects(payload: dict, authorization: Optional[str] = Header(None),
+                        session: Session = Depends(get_session)):
+    """Move the calling machine's rows from a stored label to the repository
+    its collector resolved it to on disk."""
+    machine = machines.authenticate(session, authorization)
+    if machine is None:
+        raise HTTPException(401, "unknown or revoked machine key")
+    renames = payload.get("renames")
+    if not isinstance(renames, dict):
+        raise HTTPException(400, "renames must be an object")
+    return {"machine": machine.name, **ingest.rename_projects(session, machine, renames)}
+
+
 @app.get("/api/config")
 def config():
     """What the UI needs to know about this deployment. The rate card lives in

@@ -192,57 +192,14 @@ are gone, and `dedupe-legacy --apply` to do it. Back up `data/meterlex.db` first
 Attributing history to repositories: a reply keeps the project it was first
 stored under, so update each machine's collector and run
 `meterlex_collector.py run --reattribute` once: it re-reads every transcript
-still on disk and replaces the project and branch of those replies. Then
-`manage.py rollup-projects` reports how older rows, whose transcripts are gone,
-would move to the repositories now known (a stored folder inside one moves to
-the deepest), and `rollup-projects --apply` moves them. Only full-path labels
-can be rolled up.
-
-## Tests and continuous integration
-
-Backend tests use isolated in-memory SQLite databases and synthetic log events:
-
-```sh
-python -m pip install -r backend/requirements-dev.txt
-python -m pytest
-```
-
-Build the React application with:
-
-```sh
-cd frontend
-npm ci
-npm run build
-```
-
-Maestro browser journeys in `.maestro/` exercise initial dashboard rendering,
-tool navigation, and the prices/settings screen using accessible selectors.
-With the Docker stack running, execute them using
-`maestro test --platform web --headless .maestro`.
-GitHub Actions runs backend tests, the production frontend build, repository
-hygiene checks, dependency audit, Docker Compose validation, and Maestro flow
-YAML validation for pull requests targeting `main` and pushes to `main`.
-Maestro's desktop-web support is currently beta, so the full browser journeys
-remain an explicit local check instead of a required merge gate.
-
-For a local development server without Docker:
-
-```sh
-# Terminal 1
-python -m venv .venv
-source .venv/bin/activate
-python -m pip install -r backend/requirements-dev.txt
-cd backend && uvicorn main:app --reload --port 8692
-
-# Terminal 2
-cd frontend
-npm ci
-npm run dev
-```
-
-On Windows PowerShell, activate the environment with
-`.venv\Scripts\Activate.ps1`. The Vite development server proxies `/api` to the
-backend on port `8692`.
+still on disk and replaces the project and branch of those replies. For older
+rows, whose transcripts are gone, run `meterlex_collector.py rollup` on each
+machine: it asks the hub which folders it stored for that machine, checks each
+one on its own disk, and reports the repository it belongs to; `rollup --apply`
+moves them. Only the machine can tell a repository from a plain folder, so a
+folder that no longer exists keeps its name (it may have been a repository of
+its own), except a gone `<repo>-wt/<name>` worktree whose repository is still
+there. Full-path labels only.
 
 ## Privacy and security
 
@@ -292,6 +249,8 @@ paths.
 | `GET` | `/api/config` | What the UI needs about this deployment: the rate card's address and the period time zone |
 | `GET` | `/api/overview` | Everything one screen needs for a period (`?period=weekly\|monthly\|yearly`, `?ref=`, `?machine=`, `?source=`): totals with the token split, the same-length period before, by machine, harness, model, project (with its top branches) and origin, and a bucketed series with the empty buckets kept |
 | `GET` | `/api/summary` | Per-tool cost summary with subscription comparison (`?machine=` filters) |
+| `GET` | `/api/projects/mine` | The project labels stored for the calling machine (collector key) |
+| `POST` | `/api/projects/rename` | Move the calling machine's rows from a stored label to its repository (`{"renames": {old: new}}`) |
 | `GET` | `/api/spend` | Aggregated spend for a period, by model, project, branch, machine and origin (`?source=`, `?machine=`) |
 | `GET` | `/api/spend/timeseries` | Bucketed series (daily / monthly / yearly) with per-source, per-model and per-machine splits |
 | `GET` | `/api/prices` | All model prices (mirrored from the model-prices service) |
