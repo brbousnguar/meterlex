@@ -10,6 +10,7 @@ into what is sent. `run --dry-run` prints exactly what would go.
     python meterlex_collector.py run [--dry-run] [--full] [--reattribute]
     python meterlex_collector.py loop [--every 300]
     python meterlex_collector.py status
+    python meterlex_collector.py rollup [--apply]
     python meterlex_collector.py install      # launchd on macOS, a Scheduled Task on Windows
 
 One file, standard library only, Python 3.9+: macOS's own /usr/bin/python3 runs
@@ -35,7 +36,7 @@ from pathlib import Path
 from typing import Iterator, Optional
 from urllib.parse import urlparse
 
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 BATCH = 1000               # turns per POST
 SPOOL_MAX = 500_000        # unsent turns kept on disk before the oldest are dropped
 HOME = Path.home()
@@ -275,6 +276,7 @@ def _repository(path: str) -> Optional[str]:
             break
     p = Path(os.sep.join(parts)) if parts[0] else Path("/" + "/".join(parts[1:]))
     root = None
+    candidate = None
     for candidate in [p, *p.parents]:
         try:
             marker = candidate / ".git"
@@ -288,8 +290,51 @@ def _repository(path: str) -> Optional[str]:
         except OSError:
             pass
         break
+    if root and candidate is not None and candidate != p:
+        root = _unignored_project(candidate, p, root)
     _root_cache[path] = root
     return root
+
+
+_ignore_cache: dict = {}
+
+
+def _unignored_project(repo_dir: Path, p: Path, root: str) -> str:
+    """A folder the repository ignores is not part of it: `~/Server` ignores
+    `webapps/`, so `~/Server/webapps/time-tracker` (no repository of its own)
+    is its own project, named by the folder just below the ignored one. Asks
+    git; without git, the repository is kept."""
+    rel = p.relative_to(repo_dir).parts
+    prefixes = ["/".join(rel[:i + 1]) + "/" for i in range(len(rel))]
+    key = (str(repo_dir), prefixes[-1])
+    if key not in _ignore_cache:
+        try:
+            done = subprocess.run(["git", "-C", str(repo_dir), "check-ignore", "--stdin"],
+                                  input="\n".join(prefixes), capture_output=True, text=True, timeout=10)
+            ignored = {ln.strip() for ln in done.stdout.splitlines()}
+        except (OSError, subprocess.SubprocessError):
+            ignored = set()
+        _ignore_cache[key] = ignored
+    ignored = _ignore_cache[key]
+    for i, prefix in enumerate(prefixes):
+        if prefix in ignored:
+            if i + 1 < len(rel) and _holds_repositories(repo_dir.joinpath(*rel[:i + 1])):
+                return str(repo_dir.joinpath(*rel[:i + 2]))
+            return root
+    return root
+
+
+def _holds_repositories(folder: Path) -> bool:
+    """An ignored folder holding other repositories (`~/Server/webapps/`) is a
+    shelf of projects; one that holds none (`dist/`, `data/`) is part of the
+    repository around it."""
+    key = str(folder)
+    if key not in _ignore_cache:
+        try:
+            _ignore_cache[key] = any((c / ".git").exists() for c in folder.iterdir() if c.is_dir())
+        except OSError:
+            _ignore_cache[key] = False
+    return _ignore_cache[key]
 
 
 def project_root(path: str) -> str:
@@ -303,7 +348,7 @@ def _is_inside(child: str, parent: str) -> bool:
     return child != parent and child.startswith(parent.rstrip("\\/") + ("\\" if "\\" in parent else "/"))
 
 
-_CD = re.compile(r"""^\s*cd\s+(?:"([^"]+)"|'([^']+)'|(\S+))""")
+_CD = re.compile(r"""^\s*cd\s+(?:"([^"]+)"|'([^']+)'|([^\s;&|]+))""")
 
 
 def _touched_paths(message: dict, cwd: str) -> list:
@@ -323,7 +368,9 @@ def _touched_paths(message: dict, cwd: str) -> list:
         for key in ("file_path", "notebook_path", "path"):
             v = args.get(key)
             if isinstance(v, str) and v:
-                found.append(v)
+                # a file is never a project: its folder is what counts
+                is_file = key != "path" or Path(v).is_file()
+                found.append(os.path.dirname(v) if is_file else v)
         cmd = args.get("command")
         if isinstance(cmd, str):
             m = _CD.match(cmd)
@@ -356,6 +403,15 @@ def attribute(cwd: str, touched: list, focus: Optional[str]) -> tuple[str, Optio
     if focus:  # touched nothing that is a project: stays with the last one
         return focus, focus
     return base, None
+
+
+def _branch(name, cwd: str) -> Optional[str]:
+    """The reply's git branch, when its folder is in a repository. Claude Code
+    records `HEAD` outside every repository (and on a detached checkout), which
+    names nothing."""
+    if not name or name == "HEAD" or not _repository(cwd):
+        return None
+    return name
 
 
 # ── Claude Code: ~/.claude/projects/**/*.jsonl ────────────────────────────────
@@ -402,7 +458,7 @@ def read_claude_code(root: Path, state: dict, full: bool) -> Iterator[dict]:
                 cache_read=_to_int(usage.get("cache_read_input_tokens")),
                 cache_write=_to_int(usage.get("cache_creation_input_tokens")),
                 origin=_claude_origin(event), alt_keys=[uuid] if msg_id else None,
-                branch=event.get("gitBranch") or None,
+                branch=_branch(event.get("gitBranch"), cwd),
             )
             k = (t["session_id"], t["turn_key"])
             if k in replies:
@@ -800,6 +856,56 @@ def label_project(path: str, policy: str, salt: str) -> str:
 
 # ── sending ───────────────────────────────────────────────────────────────────
 
+def _hub(cfg: dict, path: str, body: Optional[dict] = None) -> dict:
+    req = urllib.request.Request(
+        cfg["hub"].rstrip("/") + path, data=json.dumps(body).encode() if body is not None else None,
+        method="POST" if body is not None else "GET",
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {cfg['key']}",
+                 "User-Agent": f"meterlex-collector/{VERSION}"},
+    )
+    with urllib.request.urlopen(req, timeout=120) as r:
+        return json.loads(r.read().decode("utf-8"))
+
+
+def resolve_stored(project: str) -> Optional[str]:
+    """The repository a stored project label belongs to, judged on this disk.
+
+    Only a folder that still exists is resolved (and a gone `<repo>-wt/<name>`
+    worktree whose repository exists): a folder that is gone might have been a
+    repository of its own, so it keeps its name rather than being folded into
+    the parent."""
+    if not project or not _is_absolute(project):
+        return None
+    gone_worktree = bool(re.search(r"-wt[\\/]", project)) and not Path(project).exists()
+    if not Path(project).exists() and not gone_worktree:
+        return None
+    repo = _repository(project)
+    if gone_worktree and repo and not re.search(r"[\\/]" + re.escape(Path(repo).name) + r"-wt[\\/]", project):
+        return None  # the worktree's own repository is gone too
+    return repo if repo and repo != project else None
+
+
+def cmd_rollup(cfg: dict, apply: bool = False) -> int:
+    """Move this machine's rows stored under a folder to that folder's
+    repository, for history whose transcripts are gone. Full-path labels only."""
+    if not cfg.get("hub") or not cfg.get("key"):
+        print("not set up: run `setup --hub URL --key KEY` first", file=sys.stderr)
+        return 2
+    if cfg.get("labels") != "full":
+        print(f"labels are {cfg.get('labels')}: only full paths can be resolved", file=sys.stderr)
+        return 2
+    stored = _hub(cfg, "/api/projects/mine")["projects"]
+    renames = {p: r for p in stored if (r := resolve_stored(p))}
+    for old, new in sorted(renames.items()):
+        print(f"  {old} -> {new}")
+    print(f"{len(renames)} of {len(stored)} stored folder(s) belong to a repository")
+    if not apply:
+        print("report only: add --apply to move them")
+        return 0
+    print(json.dumps(_hub(cfg, "/api/projects/rename", {"renames": renames})))
+    return 0
+
+
 def post(cfg: dict, turns: list) -> dict:
     body = json.dumps({"collector": VERSION, "machine": cfg["machine"], "turns": turns}).encode()
     req = urllib.request.Request(
@@ -991,6 +1097,8 @@ def main(argv=None) -> int:
     lp = sub.add_parser("loop", help="run every --every seconds")
     lp.add_argument("--every", type=int, default=300)
     sub.add_parser("status", help="configuration, sources and the last run")
+    ru = sub.add_parser("rollup", help="move this machine's stored folders to their repositories (history)")
+    ru.add_argument("--apply", action="store_true", help="change the hub (default: report only)")
     i = sub.add_parser("install", help="run automatically: launchd on macOS, a Scheduled Task on Windows")
     i.add_argument("--every", type=int, default=300)
     args = ap.parse_args(argv)
@@ -1002,6 +1110,8 @@ def main(argv=None) -> int:
         return cmd_run(cfg, dry_run=args.dry_run, full=args.full, reattribute=args.reattribute)
     if args.cmd == "status":
         return cmd_status(cfg)
+    if args.cmd == "rollup":
+        return cmd_rollup(cfg, apply=args.apply)
     if args.cmd == "install":
         return cmd_install(args.every)
     while True:

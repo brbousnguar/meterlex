@@ -60,6 +60,31 @@ def test_a_dependency_checkout_counts_toward_the_project_using_it(server):
     assert mc.project_root(str(dep)) == str(server / "apps" / "localingo")
 
 
+def test_a_folder_the_repository_ignores_is_its_own_project(server):
+    import subprocess
+    subprocess.run(["git", "init", "-q", str(server)], check=True)
+    (server / ".gitignore").write_text("scratch/\ndist/\n")
+    app = server / "scratch" / "time-tracker"
+    (app / "src").mkdir(parents=True)
+    (server / "scratch" / "other-app" / ".git").mkdir(parents=True)   # scratch/ is a shelf of projects
+    (server / "dist" / "assets").mkdir(parents=True)                    # dist/ holds no repository
+    mc._root_cache.clear()
+    mc._ignore_cache.clear()
+    assert mc.project_root(str(app / "src")) == str(app)
+    assert mc.project_root(str(server / "scratch")) == str(server)          # the shelf itself
+    assert mc.project_root(str(server / "dist" / "assets")) == str(server)  # build output: part of it
+    assert mc.project_root(str(server / "notes")) == str(server)            # not ignored: part of it
+    assert mc.resolve_stored(str(server / "scratch" / "gone-app")) is None  # gone: keeps its name
+
+
+def test_a_touched_file_counts_by_its_folder_and_cd_stops_at_the_command_end(server, tmp_path):
+    turns, _ = read(tmp_path, [
+        line("u1", "m1", server, [("Edit", {"file_path": str(server / "CLAUDE.md")})]),
+        line("u2", "m2", server, [("Bash", {"command": "cd webapps/minerva; npm test"})]),
+    ])
+    assert (turns["m1"]["project"], turns["m2"]["project"]) == (str(server), str(server / "webapps" / "minerva"))
+
+
 def test_a_folder_outside_every_repository_or_gone_stays_as_it_is(tmp_path):
     mc._root_cache.clear()
     assert mc.project_root(str(tmp_path / "loose")) == str(tmp_path / "loose")
@@ -138,6 +163,15 @@ def test_the_most_touched_nested_repository_wins(server, tmp_path):
     assert turns["m1"]["project"] == str(a)
 
 
+def test_head_outside_a_repository_is_no_branch(server, tmp_path):
+    loose = tmp_path / "loose"
+    loose.mkdir()
+    turns, _ = read(tmp_path, [line("u1", "m1", loose, branch="HEAD"),
+                               line("u2", "m2", server / "webapps" / "minerva", branch="HEAD"),
+                               line("u3", "m3", loose, branch="main")])
+    assert [turns[k].get("branch") for k in ("m1", "m2", "m3")] == [None, None, None]
+
+
 def test_a_hash_machine_sends_its_branches_hashed():
     assert mc.label_branch("feat/secret-thing", "hash", "salt").startswith("b-")
     assert mc.label_branch("feat/x", "basename", "salt") == "feat/x"
@@ -157,10 +191,9 @@ def _turn(**over):
     return t
 
 
-def test_the_hub_stores_the_branch(session):
-    ingest.ingest_turns(session, _machine(session), [_turn(branch="feat/x")])
-    [row] = session.exec(select(UsageTurn)).all()
-    assert row.branch == "feat/x"
+def test_the_hub_stores_the_branch_but_not_head(session):
+    ingest.ingest_turns(session, _machine(session), [_turn(branch="feat/x"), _turn(turn_key="m2", branch="HEAD")])
+    assert {r.turn_key: r.branch for r in session.exec(select(UsageTurn)).all()} == {"msg_1": "feat/x", "m2": None}
 
 
 def test_a_reply_keeps_its_first_project_unless_reattributed(session):
@@ -173,20 +206,46 @@ def test_a_reply_keeps_its_first_project_unless_reattributed(session):
     assert (row.project, row.branch) == ("/Server/webapps/minerva", "main")
 
 
-def test_old_rows_roll_up_to_the_repositories_now_known(session):
+def test_stored_folders_resolve_only_when_this_disk_can_tell(server):
+    minerva = server / "webapps" / "minerva"
+    assert mc.resolve_stored(str(minerva / "frontend" / "src")) == str(minerva)
+    assert mc.resolve_stored(str(minerva)) is None                          # already a repository
+    assert mc.resolve_stored(str(server / "notes")) == str(server)          # a plain folder of ~/Server
+    # gone: it might have been a repository of its own, so it keeps its name
+    assert mc.resolve_stored(str(server / "webapps" / "nutrition-track")) is None
+    # a gone worktree whose repository exists counts toward it
+    assert mc.resolve_stored(str(server / "webapps" / "minerva-wt" / "9" / "src")) == str(minerva)
+    assert mc.resolve_stored(str(server / "webapps" / "gone-wt" / "1")) is None
+    assert mc.resolve_stored("minerva") is None                             # not a path
+
+
+def test_a_machine_renames_only_its_own_rows(session):
     old = dict(source="claude-code", session_id="old", model_id="claude-opus-5", ts=datetime(2026, 8, 1))
+    laptop = _machine(session)
+    machines.create(session, "desk", "full")
     session.add_all([
-        UsageTurn(turn_key="a", project="/Server/webapps/minerva/frontend/src", **old),
-        UsageTurn(turn_key="b", project="/Server/webapps/minerva", **old),
-        UsageTurn(turn_key="c", project="/Server/notes", **old),
-        UsageTurn(turn_key="d", project="minerva", **old),                     # a basename label
-        UsageTurn(turn_key="e", project="/Server/webapps/minerva", branch="main", **{**old, "session_id": "new"}),
-        UsageTurn(turn_key="f", project="/Server", branch="main", **{**old, "session_id": "new"}),
+        UsageTurn(turn_key="a", project="/Server/webapps/minerva/frontend", machine="laptop", **old),
+        UsageTurn(turn_key="b", project="/Server/webapps/minerva/frontend", machine="desk", **old),
     ])
     session.commit()
-    report = ingest.rollup_projects(session)
-    assert (report["folders_moved"], report["rows_moved"], report["applied"]) == (2, 2, False)
-    ingest.rollup_projects(session, apply=True)
+    assert ingest.machine_projects(session, laptop) == ["/Server/webapps/minerva/frontend"]
+    result = ingest.rename_projects(session, laptop, {"/Server/webapps/minerva/frontend": "/Server/webapps/minerva",
+                                                      "": "/x", "/y": 3})
+    assert result == {"folders_moved": 1, "rows_moved": 1}
     by_key = {r.turn_key: r.project for r in session.exec(select(UsageTurn)).all()}
-    assert by_key == {"a": "/Server/webapps/minerva", "b": "/Server/webapps/minerva", "c": "/Server",
-                      "d": "minerva", "e": "/Server/webapps/minerva", "f": "/Server"}
+    assert by_key == {"a": "/Server/webapps/minerva", "b": "/Server/webapps/minerva/frontend"}
+
+
+def test_renames_keep_a_machines_label_policy(session):
+    machines.create(session, "private", "basename")
+    m = session.get(Machine, "private")
+    session.add(UsageTurn(source="claude-code", session_id="s", turn_key="a", project="src", machine="private",
+                          model_id="claude-opus-5", ts=datetime(2026, 8, 1)))
+    session.commit()
+    ingest.rename_projects(session, m, {"src": "/Users/me/secret-repo"})
+    assert session.exec(select(UsageTurn)).one().project == "secret-repo"
+
+
+def test_the_rename_endpoints_need_a_machine_key(client):
+    assert client.get("/api/projects/mine").status_code == 401
+    assert client.post("/api/projects/rename", json={"renames": {}}).status_code == 401

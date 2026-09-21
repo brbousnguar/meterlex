@@ -58,6 +58,12 @@ def label_project(project: str, labels: str) -> str:
     return "p-" + hashlib.sha256(project.encode()).hexdigest()[:10]
 
 
+def _branch_name(value) -> str:
+    """`HEAD` is what Claude Code records outside a repository: no branch."""
+    name = str(value or "").strip()
+    return "" if name == "HEAD" else name
+
+
 def label_branch(branch: str, labels: str) -> str:
     """A `hash` machine's branch names are stored hashed, like its projects."""
     if not branch or labels != "hash" or branch.startswith("b-"):
@@ -87,7 +93,7 @@ def _normalize(raw: dict, machine: Machine) -> dict:
         "ts": _ts(raw.get("ts")),
         "project": label_project(str(raw.get("project") or ""), machine.labels)[:500],
         "origin": raw.get("origin") if raw.get("origin") in ORIGINS else None,
-        "branch": label_branch(str(raw.get("branch") or ""), machine.labels)[:200] or None,
+        "branch": label_branch(_branch_name(raw.get("branch")), machine.labels)[:200] or None,
         "snapshot": bool(raw.get("snapshot")),
         "reattribute": bool(raw.get("reattribute")),
         "alt_keys": [str(k)[:200] for k in (raw.get("alt_keys") or [])][:50],
@@ -216,41 +222,36 @@ def reclassify_existing(session: Session) -> int:
     return result.rowcount or 0
 
 
-def rollup_projects(session: Session, apply: bool = False) -> dict:
-    """Move rows stored under a folder inside a repository to that repository.
+def machine_projects(session: Session, machine: Machine) -> list:
+    """The project labels stored for one machine, for its collector to resolve."""
+    return sorted(p for p in session.exec(
+        select(UsageTurn.project).where(UsageTurn.machine == machine.name, UsageTurn.project.is_not(None)).distinct()
+    ).all() if p)
 
-    Collectors now send each reply's repository, but rows stored before that
-    carry the raw working folder (…/minerva/frontend/src), and a transcript
-    that is gone cannot be read again. The repositories are known from the
-    rows collectors attributed since (the ones with a branch): a row whose
-    folder lies inside one of them moves to the deepest such repository.
-    Only full-path labels are touched; basename and hash labels carry no
-    parent to match."""
-    roots = {p for p in session.exec(
-        select(UsageTurn.project).where(UsageTurn.branch.is_not(None), UsageTurn.project.is_not(None)).distinct()
-    ).all() if p and re.match(r"^(/|[A-Za-z]:[\\/])", p)}
-    ordered = sorted(roots, key=len, reverse=True)
-    moves: dict = {}
-    for project in session.exec(select(UsageTurn.project).where(UsageTurn.project.is_not(None)).distinct()).all():
-        if not project or project in roots:
+
+def rename_projects(session: Session, machine: Machine, renames: dict) -> dict:
+    """Apply a collector's {stored label: repository} renames to its own rows.
+
+    Only the machine can tell a repository from a plain folder (it has the
+    disk), so the hub never guesses: it moves exactly what the collector
+    resolved, for that machine, with its label policy enforced."""
+    folders = rows = 0
+    for old, new in renames.items():
+        if not isinstance(old, str) or not isinstance(new, str) or not old or not new:
             continue
-        for root in ordered:
-            sep = "\\" if "\\" in root else "/"
-            if project.startswith(root.rstrip("\\/") + sep):
-                moves[project] = root
-                break
-    rows = 0
-    for old, new in moves.items():
-        matching = session.exec(select(UsageTurn).where(UsageTurn.project == old)).all()
-        rows += len(matching)
-        if apply:
-            for row in matching:
-                row.project = new
-                session.add(row)
-    if apply:
-        session.commit()
-    return {"repositories": len(roots), "folders_moved": len(moves), "rows_moved": rows,
-            "moves": dict(sorted(moves.items())), "applied": apply}
+        new = label_project(new, machine.labels)[:500]
+        if new == old:
+            continue
+        matching = session.exec(select(UsageTurn).where(
+            UsageTurn.machine == machine.name, UsageTurn.project == old)).all()
+        if matching:
+            folders += 1
+        for row in matching:
+            row.project = new
+            session.add(row)
+            rows += 1
+    session.commit()
+    return {"folders_moved": folders, "rows_moved": rows}
 
 
 def dedupe_legacy(session: Session, apply: bool = False) -> dict:

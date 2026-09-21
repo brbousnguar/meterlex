@@ -49,6 +49,8 @@ def _migrate_columns(target):
             conn.exec_driver_sql("ALTER TABLE usage_turns ADD COLUMN origin VARCHAR")
         if "branch" not in turn_cols:
             conn.exec_driver_sql("ALTER TABLE usage_turns ADD COLUMN branch VARCHAR")
+        # Claude Code records HEAD outside a repository; collectors 0.2.0 sent it
+        conn.exec_driver_sql("UPDATE usage_turns SET branch = NULL WHERE branch = 'HEAD'")
         conn.commit()
 
 

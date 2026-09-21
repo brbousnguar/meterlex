@@ -6,4 +6,4 @@
 ### Added
 
 - Each Claude Code reply stores its git branch; `/api/spend` returns `by_branch` and each project in `/api/overview` lists its top branches. A `hash` machine hashes branch names.
-- `meterlex_collector.py run --reattribute` re-reads every transcript and replaces the project and branch the hub stored; `manage.py rollup-projects [--apply]` moves older rows, whose transcripts are gone, to the repositories now known.
+- `meterlex_collector.py run --reattribute` re-reads every transcript and replaces the project and branch the hub stored; older rows, whose transcripts are gone, are rolled up by each machine (see the fix below).

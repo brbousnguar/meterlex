@@ -24,6 +24,10 @@ def test_an_existing_database_gains_the_branch_column():
                           "turn_key VARCHAR, project VARCHAR, model_id VARCHAR, ts DATETIME, "
                           "machine VARCHAR NOT NULL DEFAULT 'hub', origin VARCHAR)"))
     database.create_db(old)
-    with old.connect() as conn:
+    with old.begin() as conn:
         cols = {row[1] for row in conn.execute(text("PRAGMA table_info(usage_turns)"))}
+        conn.execute(text("INSERT INTO usage_turns (id, branch) VALUES (1, 'HEAD'), (2, 'main')"))
     assert "branch" in cols
+    database.create_db(old)  # Claude Code's HEAD outside a repository is no branch
+    with old.connect() as conn:
+        assert dict(conn.execute(text("SELECT id, branch FROM usage_turns")).all()) == {1: None, 2: "main"}
