@@ -34,7 +34,8 @@ host; transcripts never leave the machine that wrote them.
 
 ## What it tracks
 
-- **Claude Code** — every reply from `~/.claude/projects/**/*.jsonl`, with its input / output / cache token breakdown. Claude Code logs each part of a reply (thinking, text, each tool call) as its own line carrying the whole reply's usage, so replies are counted once, by message id, at their final numbers; counting lines overstated tokens about 2.5×. Each reply records whether it was interactive, an automated SDK run or a subagent.
+- **Claude Code** — every reply from `~/.claude/projects/**/*.jsonl`, with its input / output / cache token breakdown. Claude Code logs each part of a reply (thinking, text, each tool call) as its own line carrying the whole reply's usage, so replies are counted once, by message id, at their final numbers; counting lines overstated tokens about 2.5×. Each reply records whether it was interactive, an automated SDK run or a subagent, and the git branch it worked on.
+- **Projects** — a Claude Code reply counts toward a **repository**, not the raw folder it ran in: its folder rolls up to the nearest parent with a `.git` (`…/minerva/frontend/src` → `minerva`), a git worktree counts toward its main checkout (a gone `<repo>-wt/<name>` folder too), and a dependency checkout (`node_modules`, `.build`, `Pods`…) toward the project using it. When a session started in a parent repository (say `~/Server`) works on files in another one (`~/Server/webapps/x`, `~/Projects/y`), the reply counts toward that one, found from the files its tool calls read, edited or `cd`'d into; the replies that follow without touching a project stay with it. Scratch files and `~/.claude` name no project. The paths are read on the machine and never sent.
 - **Codex** — per-turn token deltas from `~/.codex/sessions/**/*.jsonl` via `token_count` events (a repeated event with an unchanged running total is skipped); OpenAI Codex endpoint billed against ChatGPT Pro quota
 - **Antigravity** — per-conversation SQLite DBs at `~/.gemini/antigravity-cli/conversations/*.db`; token counts extracted from protobuf step payloads, model IDs from `gen_metadata` blobs
 - **Gemini CLI** — each message from `~/.gemini/tmp/<project>/chats/*.jsonl`, once: the CLI appends a message again every time it updates it. Cached input is its own count and thoughts are billed as output.
@@ -188,6 +189,15 @@ one-row-per-logged-part Claude Code rows into one per reply), then
 `manage.py dedupe-legacy` to report the same fold for rows whose transcripts
 are gone, and `dedupe-legacy --apply` to do it. Back up `data/meterlex.db` first.
 
+Attributing history to repositories: a reply keeps the project it was first
+stored under, so update each machine's collector and run
+`meterlex_collector.py run --reattribute` once: it re-reads every transcript
+still on disk and replaces the project and branch of those replies. Then
+`manage.py rollup-projects` reports how older rows, whose transcripts are gone,
+would move to the repositories now known (a stored folder inside one moves to
+the deepest), and `rollup-projects --apply` moves them. Only full-path labels
+can be rolled up.
+
 ## Tests and continuous integration
 
 Backend tests use isolated in-memory SQLite databases and synthetic log events:
@@ -238,7 +248,8 @@ backend on port `8692`.
 
 - Collectors send token counts only, never prompts, replies or file contents;
   `run --dry-run` shows every field. Rows keep a project label: the full path,
-  the folder name or a hash, per machine.
+  the folder name or a hash, per machine. A `hash` machine hashes its branch
+  names too. The file paths used to pick a reply's project stay on the machine.
 - Each machine sends with its own key, stored on the hub as a SHA-256 hash; a
   revoked key is refused.
 - Runtime databases, environment files, coverage output, and browser artifacts
@@ -279,9 +290,9 @@ paths.
 | `POST` | `/api/ingest` | A collector's batch (`Authorization: Bearer <machine key>`); returns inserted / updated / folded / rejected |
 | `GET` | `/api/machines` | Each machine: label policy, last report, collector version, turns and tokens |
 | `GET` | `/api/config` | What the UI needs about this deployment: the rate card's address and the period time zone |
-| `GET` | `/api/overview` | Everything one screen needs for a period (`?period=weekly\|monthly\|yearly`, `?ref=`, `?machine=`, `?source=`): totals with the token split, the same-length period before, by machine, harness, model, project and origin, and a bucketed series with the empty buckets kept |
+| `GET` | `/api/overview` | Everything one screen needs for a period (`?period=weekly\|monthly\|yearly`, `?ref=`, `?machine=`, `?source=`): totals with the token split, the same-length period before, by machine, harness, model, project (with its top branches) and origin, and a bucketed series with the empty buckets kept |
 | `GET` | `/api/summary` | Per-tool cost summary with subscription comparison (`?machine=` filters) |
-| `GET` | `/api/spend` | Aggregated spend for a period, by model, project, machine and origin (`?source=`, `?machine=`) |
+| `GET` | `/api/spend` | Aggregated spend for a period, by model, project, branch, machine and origin (`?source=`, `?machine=`) |
 | `GET` | `/api/spend/timeseries` | Bucketed series (daily / monthly / yearly) with per-source, per-model and per-machine splits |
 | `GET` | `/api/prices` | All model prices (mirrored from the model-prices service) |
 | `POST` | `/api/prices/mirror-pull` | Pull latest rates from model-prices and recompute all costs |

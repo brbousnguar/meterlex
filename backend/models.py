@@ -28,6 +28,7 @@ class UsageTurn(SQLModel, table=True):
     ts: datetime = Field(index=True)
     machine: str = Field(default=HUB_MACHINE, index=True)
     origin: Optional[str] = None        # interactive | automated | subagent
+    branch: Optional[str] = None        # git branch of the working folder (Claude Code), or its label
     input_tokens: int = 0
     output_tokens: int = 0
     cache_read: int = 0

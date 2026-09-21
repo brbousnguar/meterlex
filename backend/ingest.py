@@ -58,6 +58,13 @@ def label_project(project: str, labels: str) -> str:
     return "p-" + hashlib.sha256(project.encode()).hexdigest()[:10]
 
 
+def label_branch(branch: str, labels: str) -> str:
+    """A `hash` machine's branch names are stored hashed, like its projects."""
+    if not branch or labels != "hash" or branch.startswith("b-"):
+        return branch
+    return "b-" + hashlib.sha256(branch.encode()).hexdigest()[:10]
+
+
 def _ts(value) -> datetime:
     """Stored times are naive UTC, as collectors send them."""
     try:
@@ -80,7 +87,9 @@ def _normalize(raw: dict, machine: Machine) -> dict:
         "ts": _ts(raw.get("ts")),
         "project": label_project(str(raw.get("project") or ""), machine.labels)[:500],
         "origin": raw.get("origin") if raw.get("origin") in ORIGINS else None,
+        "branch": label_branch(str(raw.get("branch") or ""), machine.labels)[:200] or None,
         "snapshot": bool(raw.get("snapshot")),
+        "reattribute": bool(raw.get("reattribute")),
         "alt_keys": [str(k)[:200] for k in (raw.get("alt_keys") or [])][:50],
     }
     for f in TOKEN_FIELDS:
@@ -147,7 +156,7 @@ def ingest_turns(session: Session, machine: Machine, turns: list, collector: Opt
             row = UsageTurn(
                 source=t["source"], session_id=t["session_id"], turn_key=t["turn_key"],
                 project=t["project"], model_id=t["model_id"], ts=t["ts"], machine=machine.name,
-                origin=t["origin"], total_tokens=t["total_tokens"],
+                origin=t["origin"], branch=t["branch"], total_tokens=t["total_tokens"],
                 **{f: t[f] for f in TOKEN_FIELDS},
             )
             _price(session, row, fx)
@@ -156,7 +165,7 @@ def ingest_turns(session: Session, machine: Machine, turns: list, collector: Opt
             counts["inserted"] += 1
             continue
 
-        before = tuple(getattr(row, f) for f in TOKEN_FIELDS) + (row.model_id, row.project, row.machine, row.origin)
+        before = tuple(getattr(row, f) for f in TOKEN_FIELDS) + (row.model_id, row.project, row.machine, row.origin, row.branch)
         if t["snapshot"]:
             for f in TOKEN_FIELDS:
                 setattr(row, f, t[f])
@@ -166,10 +175,16 @@ def ingest_turns(session: Session, machine: Machine, turns: list, collector: Opt
             for f in TOKEN_FIELDS:
                 setattr(row, f, max(getattr(row, f), t[f]))
             row.total_tokens = row.input_tokens + row.output_tokens + row.cache_read + row.cache_write
-            row.project = row.project or t["project"]
+            # A reply keeps the project it was first stored under, unless the
+            # collector re-reads its transcript to attribute it again.
+            if t["reattribute"] and t["project"]:
+                row.project = t["project"]
+            else:
+                row.project = row.project or t["project"]
         row.machine = machine.name
         row.origin = row.origin or t["origin"]
-        after = tuple(getattr(row, f) for f in TOKEN_FIELDS) + (row.model_id, row.project, row.machine, row.origin)
+        row.branch = t["branch"] if t["reattribute"] and t["branch"] else (row.branch or t["branch"])
+        after = tuple(getattr(row, f) for f in TOKEN_FIELDS) + (row.model_id, row.project, row.machine, row.origin, row.branch)
         if after != before:
             _price(session, row, fx)
             session.add(row)
@@ -199,6 +214,43 @@ def reclassify_existing(session: Session) -> int:
     ))
     session.commit()
     return result.rowcount or 0
+
+
+def rollup_projects(session: Session, apply: bool = False) -> dict:
+    """Move rows stored under a folder inside a repository to that repository.
+
+    Collectors now send each reply's repository, but rows stored before that
+    carry the raw working folder (…/minerva/frontend/src), and a transcript
+    that is gone cannot be read again. The repositories are known from the
+    rows collectors attributed since (the ones with a branch): a row whose
+    folder lies inside one of them moves to the deepest such repository.
+    Only full-path labels are touched; basename and hash labels carry no
+    parent to match."""
+    roots = {p for p in session.exec(
+        select(UsageTurn.project).where(UsageTurn.branch.is_not(None), UsageTurn.project.is_not(None)).distinct()
+    ).all() if p and re.match(r"^(/|[A-Za-z]:[\\/])", p)}
+    ordered = sorted(roots, key=len, reverse=True)
+    moves: dict = {}
+    for project in session.exec(select(UsageTurn.project).where(UsageTurn.project.is_not(None)).distinct()).all():
+        if not project or project in roots:
+            continue
+        for root in ordered:
+            sep = "\\" if "\\" in root else "/"
+            if project.startswith(root.rstrip("\\/") + sep):
+                moves[project] = root
+                break
+    rows = 0
+    for old, new in moves.items():
+        matching = session.exec(select(UsageTurn).where(UsageTurn.project == old)).all()
+        rows += len(matching)
+        if apply:
+            for row in matching:
+                row.project = new
+                session.add(row)
+    if apply:
+        session.commit()
+    return {"repositories": len(roots), "folders_moved": len(moves), "rows_moved": rows,
+            "moves": dict(sorted(moves.items())), "applied": apply}
 
 
 def dedupe_legacy(session: Session, apply: bool = False) -> dict:
