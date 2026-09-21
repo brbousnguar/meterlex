@@ -172,14 +172,18 @@ def test_head_outside_a_repository_is_no_branch(server, tmp_path):
     assert [turns[k].get("branch") for k in ("m1", "m2", "m3")] == [None, None, None]
 
 
-def test_a_reply_counted_toward_another_repository_carries_no_branch(server, tmp_path):
+def test_the_branch_belongs_to_the_repository_the_session_started_in(server, tmp_path):
     minerva = server / "webapps" / "minerva"
-    turns, _ = read(tmp_path, [
-        line("u1", "m1", minerva, [("Edit", {"file_path": str(server / "CLAUDE.md")})], branch="feat/x"),
+    turns, state = read(tmp_path, [
+        # the session starts in ~/Server on feat/x; Claude Code keeps logging that branch
+        line("u1", "m1", server, [("Edit", {"file_path": str(server / "CLAUDE.md")})], branch="feat/x"),
         line("u2", "m2", minerva, [("Edit", {"file_path": str(minerva / "a.ts")})], branch="feat/x"),
     ])
-    assert (turns["m1"]["project"], turns["m1"].get("branch")) == (str(server), None)
-    assert (turns["m2"]["project"], turns["m2"].get("branch")) == (str(minerva), "feat/x")
+    assert (turns["m1"]["project"], turns["m1"].get("branch")) == (str(server), "feat/x")
+    assert (turns["m2"]["project"], turns["m2"].get("branch")) == (str(minerva), None)
+    turns, _ = read(tmp_path, [line("u3", "m3", minerva, [("Edit", {"file_path": str(server / "a.md")})],
+                                    branch="feat/x")], state)  # the next pass still knows the start
+    assert turns["m3"].get("branch") == "feat/x"
 
 
 def test_a_hash_machine_sends_its_branches_hashed():

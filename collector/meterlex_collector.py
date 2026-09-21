@@ -36,7 +36,7 @@ from pathlib import Path
 from typing import Iterator, Optional
 from urllib.parse import urlparse
 
-VERSION = "0.3.1"
+VERSION = "0.3.2"
 BATCH = 1000               # turns per POST
 SPOOL_MAX = 500_000        # unsent turns kept on disk before the oldest are dropped
 HOME = Path.home()
@@ -439,7 +439,8 @@ def read_claude_code(root: Path, state: dict, full: bool) -> Iterator[dict]:
             continue
         replies: dict = {}
         end = offset
-        focus = None if offset == 0 else (state["files"].get(key) or {}).get("focus")
+        seen = {} if offset == 0 else (state["files"].get(key) or {})
+        focus, start = seen.get("focus"), seen.get("start")
         for end, event in _lines(fp, offset):
             if not event or event.get("type") != "assistant":
                 continue
@@ -450,6 +451,8 @@ def read_claude_code(root: Path, state: dict, full: bool) -> Iterator[dict]:
                 continue
             msg_id = msg.get("id")
             cwd = event.get("cwd", "")
+            if start is None and cwd:
+                start = project_root(cwd)
             project, focus = attribute(cwd, _touched_paths(msg, cwd), focus)
             t = turn(
                 "claude-code", event.get("sessionId") or fp.stem, msg_id or uuid, project,
@@ -458,8 +461,9 @@ def read_claude_code(root: Path, state: dict, full: bool) -> Iterator[dict]:
                 cache_read=_to_int(usage.get("cache_read_input_tokens")),
                 cache_write=_to_int(usage.get("cache_creation_input_tokens")),
                 origin=_claude_origin(event), alt_keys=[uuid] if msg_id else None,
-                # the branch is the working folder's: it names nothing in another repository
-                branch=_branch(event.get("gitBranch"), cwd) if project == project_root(cwd) else None,
+                # Claude Code records the branch of the repository the session started
+                # in, whatever the working folder: it names nothing in another one
+                branch=_branch(event.get("gitBranch"), cwd) if project == start else None,
             )
             k = (t["session_id"], t["turn_key"])
             if k in replies:
@@ -470,7 +474,7 @@ def read_claude_code(root: Path, state: dict, full: bool) -> Iterator[dict]:
             else:
                 replies[k] = t
         yield from replies.values()
-        _mark(state, key, fp, end, focus=focus)
+        _mark(state, key, fp, end, focus=focus, start=start)
 
 
 # ── Codex: ~/.codex/sessions/**/*.jsonl (token_count events) ──────────────────
