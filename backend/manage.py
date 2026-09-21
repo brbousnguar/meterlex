@@ -4,6 +4,7 @@
     docker compose exec backend python manage.py machine-list
     docker compose exec backend python manage.py machine-revoke NAME
     docker compose exec backend python manage.py dedupe-legacy [--apply]
+    docker compose exec backend python manage.py rollup-projects [--apply]
 
 machine-add prints the machine's key once; give it to that machine's collector
 (`meterlex_collector.py setup --hub … --key …`). Re-running it re-keys the machine.
@@ -32,6 +33,9 @@ def main(argv=None) -> int:
     r.add_argument("name")
     d = sub.add_parser("dedupe-legacy", help="fold old per-line Claude Code rows into one per reply")
     d.add_argument("--apply", action="store_true", help="change the database (default: report only)")
+    u = sub.add_parser("rollup-projects",
+                       help="move rows stored under a folder inside a known repository to that repository")
+    u.add_argument("--apply", action="store_true", help="change the database (default: report only)")
     args = ap.parse_args(argv)
 
     create_db()
@@ -49,6 +53,8 @@ def main(argv=None) -> int:
             print("revoked" if machines.revoke(session, args.name) else "no such machine")
         elif args.cmd == "dedupe-legacy":
             print(json.dumps(ingest.dedupe_legacy(session, apply=args.apply), indent=1))
+        elif args.cmd == "rollup-projects":
+            print(json.dumps(ingest.rollup_projects(session, apply=args.apply), indent=1))
     return 0
 
 

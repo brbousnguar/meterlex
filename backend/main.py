@@ -351,6 +351,7 @@ def spend(
         "turns": int(turns),
         "by_model": rows(UsageTurn.model_id, "model_id", "(unknown)"),
         "by_project": rows(UsageTurn.project, "project", "(no cwd)"),
+        "by_branch": rows(UsageTurn.branch, "branch", "(no branch)"),
         "by_machine": rows(UsageTurn.machine, "machine", "(unknown)"),
         "by_origin": rows(UsageTurn.origin, "origin", "(unrecorded)"),
     }
@@ -587,8 +588,24 @@ def overview(
         slices.sort(key=lambda r: -r["tokens"])
         del slices[4:]
 
+    # The branches worked on in each folder: roughly, what each project's
+    # tokens were spent on (one branch is usually one pull request).
+    project_branches: dict = {}
+    for proj, branch, tok, n, eur in session.exec(
+        select(UsageTurn.project, UsageTurn.branch, func.sum(UsageTurn.total_tokens),
+               func.count(UsageTurn.id), func.sum(UsageTurn.cost_eur))
+        .where(*base, UsageTurn.branch.is_not(None)).group_by(UsageTurn.project, UsageTurn.branch)
+    ).all():
+        project_branches.setdefault(proj or "(no folder)", []).append({
+            "branch": branch, "tokens": int(tok or 0), "turns": int(n), "cost_eur": round(eur or 0, 4),
+        })
+    for slices in project_branches.values():
+        slices.sort(key=lambda r: -r["tokens"])
+        del slices[5:]
+
     def with_sources(item):
         item["sources"] = project_sources.get(item["project"], [])
+        item["branches"] = project_branches.get(item["project"], [])
 
     by_project = group(UsageTurn.project, "project", "(no folder)", with_sources)[:20]
     by_origin = group(UsageTurn.origin, "origin", "(unrecorded)")

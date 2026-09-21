@@ -47,6 +47,8 @@ def _migrate_columns(target):
             conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_usage_turns_machine ON usage_turns (machine)")
         if "origin" not in turn_cols:
             conn.exec_driver_sql("ALTER TABLE usage_turns ADD COLUMN origin VARCHAR")
+        if "branch" not in turn_cols:
+            conn.exec_driver_sql("ALTER TABLE usage_turns ADD COLUMN branch VARCHAR")
         conn.commit()
 
 

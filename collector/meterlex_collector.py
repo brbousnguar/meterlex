@@ -7,7 +7,7 @@ token numbers. Prompts, replies, tool output and file contents are never read
 into what is sent. `run --dry-run` prints exactly what would go.
 
     python meterlex_collector.py setup --hub URL --key KEY [--machine NAME] [--labels full|basename|hash]
-    python meterlex_collector.py run [--dry-run] [--full]
+    python meterlex_collector.py run [--dry-run] [--full] [--reattribute]
     python meterlex_collector.py loop [--every 300]
     python meterlex_collector.py status
     python meterlex_collector.py install      # launchd on macOS, a Scheduled Task on Windows
@@ -35,7 +35,7 @@ from pathlib import Path
 from typing import Iterator, Optional
 from urllib.parse import urlparse
 
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 BATCH = 1000               # turns per POST
 SPOOL_MAX = 500_000        # unsent turns kept on disk before the oldest are dropped
 HOME = Path.home()
@@ -127,7 +127,8 @@ TOKEN_FIELDS = ("input_tokens", "output_tokens", "cache_read", "cache_write", "r
 
 
 def turn(source, session_id, turn_key, project, model_id, ts, inp=0, out=0, cache_read=0,
-         cache_write=0, reasoning=0, total=None, origin=None, snapshot=False, alt_keys=None) -> dict:
+         cache_write=0, reasoning=0, total=None, origin=None, snapshot=False, alt_keys=None,
+         branch=None) -> dict:
     """One usage record, the hub's wire format. `snapshot` rows (a whole
     session's running totals) replace their previous values on the hub.
     `alt_keys` are older keys the same usage was once stored under, so the hub
@@ -140,6 +141,8 @@ def turn(source, session_id, turn_key, project, model_id, ts, inp=0, out=0, cach
         "total_tokens": total if total is not None else inp + out + cache_read + cache_write,
         "origin": origin, "snapshot": snapshot,
     }
+    if branch:
+        t["branch"] = branch
     if alt_keys:
         t["alt_keys"] = list(alt_keys)
     return t
@@ -154,6 +157,8 @@ def _merge_max(a: dict, b: dict) -> dict:
     m["total_tokens"] = m["input_tokens"] + m["output_tokens"] + m["cache_read"] + m["cache_write"]
     m["ts"] = min(a["ts"], b["ts"])
     m["origin"] = a.get("origin") or b.get("origin")
+    if b.get("branch") and not a.get("branch"):
+        m["branch"] = b["branch"]
     keys = list(dict.fromkeys((a.get("alt_keys") or []) + (b.get("alt_keys") or [])))
     if keys:
         m["alt_keys"] = keys
@@ -209,6 +214,150 @@ def _snapshot_changed(state: dict, key: str, t: dict) -> bool:
     return True
 
 
+# ── projects: a folder rolls up to its repository ─────────────────────────────
+
+# Folders that belong to the project around them, even when they hold a git
+# checkout of their own (SwiftPM and CocoaPods clone dependencies with .git).
+_DEPENDENCY_DIRS = {"node_modules", ".build", "Pods", "Carthage", "DerivedData", ".venv", "venv",
+                    "vendor", "site-packages", ".gradle", "target"}
+_root_cache: dict = {}
+
+
+def _is_absolute(path: str) -> bool:
+    return path.startswith("/") or bool(re.match(r"^[A-Za-z]:[\\/]", path)) or path.startswith("\\\\")
+
+
+_WORKTREE_DIR = re.compile(r"^(.+)-wt$")
+
+
+def _main_checkout(git_file: Path) -> Optional[Path]:
+    """A worktree's `.git` is a file naming the main checkout's git folder
+    (`gitdir: /repo/.git/worktrees/x`); its work belongs to that checkout."""
+    try:
+        text = git_file.read_text(encoding="utf-8", errors="replace").strip()
+    except OSError:
+        return None
+    if not text.startswith("gitdir:"):
+        return None
+    gitdir = Path(text[len("gitdir:"):].strip())
+    if not gitdir.is_absolute():
+        gitdir = (git_file.parent / gitdir).resolve()
+    for parent in gitdir.parents:
+        if parent.name == ".git":
+            return parent.parent
+    return None
+
+
+def _repository(path: str) -> Optional[str]:
+    """The repository a folder or file belongs to, or None outside every one.
+
+    - the nearest parent with a `.git`, cut above any dependency folder;
+    - a git worktree counts toward its main checkout;
+    - a worktree folder that is gone, named `<repo>-wt/<name>` (the layout
+      these machines use), counts toward `<repo>` when that repository exists.
+    """
+    if not path or not _is_absolute(path):
+        return None
+    if path in _root_cache:
+        return _root_cache[path]
+    parts = re.split(r"[\\/]", path)
+    for i, part in enumerate(parts):
+        if part in _DEPENDENCY_DIRS:
+            parts = parts[:i]
+            break
+    for i, part in enumerate(parts):
+        m = _WORKTREE_DIR.match(part)
+        if m and i + 1 < len(parts):
+            sibling = parts[:i] + [m.group(1)]
+            main = Path(os.sep.join(sibling)) if sibling[0] else Path("/" + "/".join(sibling[1:]))
+            if (main / ".git").exists():
+                parts = sibling
+            break
+    p = Path(os.sep.join(parts)) if parts[0] else Path("/" + "/".join(parts[1:]))
+    root = None
+    for candidate in [p, *p.parents]:
+        try:
+            marker = candidate / ".git"
+            if marker.is_dir():
+                root = str(candidate)
+            elif marker.is_file():
+                main = _main_checkout(marker)
+                root = str(main if main and (main / ".git").is_dir() else candidate)
+            else:
+                continue
+        except OSError:
+            pass
+        break
+    _root_cache[path] = root
+    return root
+
+
+def project_root(path: str) -> str:
+    """The project a working folder counts toward: its repository, or the
+    folder itself outside every repository (or once it is gone from this
+    machine, when there is nothing left to look at)."""
+    return _repository(path) or path or ""
+
+
+def _is_inside(child: str, parent: str) -> bool:
+    return child != parent and child.startswith(parent.rstrip("\\/") + ("\\" if "\\" in parent else "/"))
+
+
+_CD = re.compile(r"""^\s*cd\s+(?:"([^"]+)"|'([^']+)'|(\S+))""")
+
+
+def _touched_paths(message: dict, cwd: str) -> list:
+    """Absolute paths one reply's tool calls worked on: the files it read or
+    edited, the folders it searched, and a Bash `cd` target. Read locally to
+    pick the project; the paths themselves are never sent."""
+    found = []
+    content = message.get("content")
+    if not isinstance(content, list):
+        return found
+    for block in content:
+        if not isinstance(block, dict) or block.get("type") != "tool_use":
+            continue
+        args = block.get("input") or {}
+        if not isinstance(args, dict):
+            continue
+        for key in ("file_path", "notebook_path", "path"):
+            v = args.get(key)
+            if isinstance(v, str) and v:
+                found.append(v)
+        cmd = args.get("command")
+        if isinstance(cmd, str):
+            m = _CD.match(cmd)
+            if m:
+                target = os.path.expanduser(next(g for g in m.groups() if g))
+                if not _is_absolute(target) and cwd:
+                    target = os.path.normpath(os.path.join(cwd, target))
+                found.append(target)
+    return [f for f in found if _is_absolute(f)]
+
+
+def attribute(cwd: str, touched: list, focus: Optional[str]) -> tuple[str, Optional[str]]:
+    """(project, new focus) for one reply.
+
+    The project is the repository of the reply's working folder, unless the
+    reply worked on files in another repository: a session started in
+    ~/Server that edits ~/Server/webapps/x, or ~/Projects/y, counts toward
+    that one. Files outside every repository (scratch files, ~/.claude) do
+    not name a project. A reply that touches no repository stays with the
+    last other one the session worked in, until it works on its own again:
+    the text that explains an edit belongs to the same project as the edit."""
+    base = project_root(cwd)
+    repos = [r for r in (_repository(t) for t in touched) if r]
+    other = [r for r in repos if r != base]
+    if other:
+        best = max(set(other), key=lambda r: (other.count(r), -other.index(r)))
+        return best, best
+    if repos:  # worked on its own repository
+        return base, None
+    if focus:  # touched nothing that is a project: stays with the last one
+        return focus, focus
+    return base, None
+
+
 # ── Claude Code: ~/.claude/projects/**/*.jsonl ────────────────────────────────
 
 def _claude_origin(event: dict) -> Optional[str]:
@@ -234,6 +383,7 @@ def read_claude_code(root: Path, state: dict, full: bool) -> Iterator[dict]:
             continue
         replies: dict = {}
         end = offset
+        focus = None if offset == 0 else (state["files"].get(key) or {}).get("focus")
         for end, event in _lines(fp, offset):
             if not event or event.get("type") != "assistant":
                 continue
@@ -243,18 +393,27 @@ def read_claude_code(root: Path, state: dict, full: bool) -> Iterator[dict]:
             if not usage or not uuid:
                 continue
             msg_id = msg.get("id")
+            cwd = event.get("cwd", "")
+            project, focus = attribute(cwd, _touched_paths(msg, cwd), focus)
             t = turn(
-                "claude-code", event.get("sessionId") or fp.stem, msg_id or uuid, event.get("cwd", ""),
+                "claude-code", event.get("sessionId") or fp.stem, msg_id or uuid, project,
                 msg.get("model", "unknown"), _parse_ts(event.get("timestamp")),
                 inp=_to_int(usage.get("input_tokens")), out=_to_int(usage.get("output_tokens")),
                 cache_read=_to_int(usage.get("cache_read_input_tokens")),
                 cache_write=_to_int(usage.get("cache_creation_input_tokens")),
                 origin=_claude_origin(event), alt_keys=[uuid] if msg_id else None,
+                branch=event.get("gitBranch") or None,
             )
             k = (t["session_id"], t["turn_key"])
-            replies[k] = _merge_max(replies[k], t) if k in replies else t
+            if k in replies:
+                merged = _merge_max(replies[k], t)
+                if t["project"] != project_root(cwd):
+                    merged["project"] = t["project"]  # a later part of the reply named another repo
+                replies[k] = merged
+            else:
+                replies[k] = t
         yield from replies.values()
-        _mark(state, key, fp, end)
+        _mark(state, key, fp, end, focus=focus)
 
 
 # ── Codex: ~/.codex/sessions/**/*.jsonl (token_count events) ──────────────────
@@ -620,6 +779,14 @@ READERS = (
 
 # ── project labels ────────────────────────────────────────────────────────────
 
+def label_branch(branch: str, policy: str, salt: str) -> str:
+    """A branch name can say what a private project is about, so a `hash`
+    machine sends it hashed too."""
+    if not branch or policy != "hash":
+        return branch or ""
+    return "b-" + hashlib.sha256((salt + branch).encode()).hexdigest()[:10]
+
+
 def label_project(path: str, policy: str, salt: str) -> str:
     """full: the path as recorded; basename: the folder name only; hash: an
     opaque stable label. Windows and POSIX separators both count."""
@@ -689,7 +856,7 @@ def spool_flush(cfg: dict) -> tuple[int, Optional[str]]:
 
 # ── commands ──────────────────────────────────────────────────────────────────
 
-def collect(cfg: dict, state: dict, full: bool) -> tuple[list, dict]:
+def collect(cfg: dict, state: dict, full: bool, reattribute: bool = False) -> tuple[list, dict]:
     turns, counts = [], {}
     for name, reader in READERS:
         path = source_path(cfg, name)
@@ -704,15 +871,19 @@ def collect(cfg: dict, state: dict, full: bool) -> tuple[list, dict]:
         turns.extend(found)
     for t in turns:
         t["project"] = label_project(t["project"], cfg["labels"], cfg.get("salt", ""))
+        if t.get("branch"):
+            t["branch"] = label_branch(t["branch"], cfg["labels"], cfg.get("salt", ""))
+        if reattribute:
+            t["reattribute"] = True
     return turns, counts
 
 
-def cmd_run(cfg: dict, dry_run: bool = False, full: bool = False) -> int:
+def cmd_run(cfg: dict, dry_run: bool = False, full: bool = False, reattribute: bool = False) -> int:
     state_path = config_dir() / "state.json"
     state = _read_json(state_path, {})
     state.setdefault("files", {})
     state.setdefault("snapshots", {})
-    turns, counts = collect(cfg, state, full)
+    turns, counts = collect(cfg, state, full or reattribute, reattribute)
     print(f"{cfg['machine']}: {len(turns)} new turn(s) " + ", ".join(f"{k} {v}" for k, v in counts.items()))
     if dry_run:
         print("dry run: nothing sent, nothing saved. The first records as they would be sent:")
@@ -815,6 +986,8 @@ def main(argv=None) -> int:
     r = sub.add_parser("run", help="one pass: read new usage and send it")
     r.add_argument("--dry-run", action="store_true", help="show what would be sent; send and save nothing")
     r.add_argument("--full", action="store_true", help="re-read every file from the start")
+    r.add_argument("--reattribute", action="store_true",
+                   help="re-read every file and replace the project and branch the hub stored for each reply")
     lp = sub.add_parser("loop", help="run every --every seconds")
     lp.add_argument("--every", type=int, default=300)
     sub.add_parser("status", help="configuration, sources and the last run")
@@ -826,7 +999,7 @@ def main(argv=None) -> int:
         return cmd_setup(args)
     cfg = load_config()
     if args.cmd == "run":
-        return cmd_run(cfg, dry_run=args.dry_run, full=args.full)
+        return cmd_run(cfg, dry_run=args.dry_run, full=args.full, reattribute=args.reattribute)
     if args.cmd == "status":
         return cmd_status(cfg)
     if args.cmd == "install":
