@@ -36,7 +36,7 @@ from pathlib import Path
 from typing import Iterator, Optional
 from urllib.parse import urlparse
 
-VERSION = "0.3.0"
+VERSION = "0.3.1"
 BATCH = 1000               # turns per POST
 SPOOL_MAX = 500_000        # unsent turns kept on disk before the oldest are dropped
 HOME = Path.home()
@@ -458,7 +458,8 @@ def read_claude_code(root: Path, state: dict, full: bool) -> Iterator[dict]:
                 cache_read=_to_int(usage.get("cache_read_input_tokens")),
                 cache_write=_to_int(usage.get("cache_creation_input_tokens")),
                 origin=_claude_origin(event), alt_keys=[uuid] if msg_id else None,
-                branch=_branch(event.get("gitBranch"), cwd),
+                # the branch is the working folder's: it names nothing in another repository
+                branch=_branch(event.get("gitBranch"), cwd) if project == project_root(cwd) else None,
             )
             k = (t["session_id"], t["turn_key"])
             if k in replies:

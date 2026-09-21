@@ -95,7 +95,7 @@ def test_edits_in_a_nested_repository_count_toward_it(server, tmp_path):
     f = server / "webapps" / "minerva" / "frontend" / "src" / "App.tsx"
     turns, _ = read(tmp_path, [line("u1", "m1", server, [("Edit", {"file_path": str(f)})])])
     assert turns["m1"]["project"] == str(server / "webapps" / "minerva")
-    assert turns["m1"]["branch"] == "main"
+    assert "branch" not in turns["m1"]  # ~/Server's branch names nothing in minerva
 
 
 def test_a_cd_into_a_nested_repository_counts_toward_it(server, tmp_path):
@@ -172,6 +172,16 @@ def test_head_outside_a_repository_is_no_branch(server, tmp_path):
     assert [turns[k].get("branch") for k in ("m1", "m2", "m3")] == [None, None, None]
 
 
+def test_a_reply_counted_toward_another_repository_carries_no_branch(server, tmp_path):
+    minerva = server / "webapps" / "minerva"
+    turns, _ = read(tmp_path, [
+        line("u1", "m1", minerva, [("Edit", {"file_path": str(server / "CLAUDE.md")})], branch="feat/x"),
+        line("u2", "m2", minerva, [("Edit", {"file_path": str(minerva / "a.ts")})], branch="feat/x"),
+    ])
+    assert (turns["m1"]["project"], turns["m1"].get("branch")) == (str(server), None)
+    assert (turns["m2"]["project"], turns["m2"].get("branch")) == (str(minerva), "feat/x")
+
+
 def test_a_hash_machine_sends_its_branches_hashed():
     assert mc.label_branch("feat/secret-thing", "hash", "salt").startswith("b-")
     assert mc.label_branch("feat/x", "basename", "salt") == "feat/x"
@@ -204,6 +214,9 @@ def test_a_reply_keeps_its_first_project_unless_reattributed(session):
     ingest.ingest_turns(session, m, [_turn(project="/Server/webapps/minerva", branch="main", reattribute=True)])
     row = session.exec(select(UsageTurn)).one()
     assert (row.project, row.branch) == ("/Server/webapps/minerva", "main")
+    ingest.ingest_turns(session, m, [_turn(project="/Server", reattribute=True)])  # no branch any more
+    row = session.exec(select(UsageTurn)).one()
+    assert (row.project, row.branch) == ("/Server", None)
 
 
 def test_stored_folders_resolve_only_when_this_disk_can_tell(server):
