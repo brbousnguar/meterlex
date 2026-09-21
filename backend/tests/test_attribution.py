@@ -186,6 +186,16 @@ def test_the_branch_belongs_to_the_repository_the_session_started_in(server, tmp
     assert turns["m3"].get("branch") == "feat/x"
 
 
+def test_a_reply_moved_to_another_repository_by_a_later_part_drops_the_branch(server, tmp_path):
+    minerva = server / "webapps" / "minerva"
+    turns, _ = read(tmp_path, [
+        {"type": "system", "cwd": str(server), "gitBranch": "feat/x"},       # the session starts here
+        line("u1", "m1", server, branch="feat/x"),                            # thinking: ~/Server
+        line("u2", "m1", server, [("Edit", {"file_path": str(minerva / "a.ts")})], branch="feat/x"),
+    ])
+    assert (turns["m1"]["project"], turns["m1"].get("branch")) == (str(minerva), None)
+
+
 def test_a_hash_machine_sends_its_branches_hashed():
     assert mc.label_branch("feat/secret-thing", "hash", "salt").startswith("b-")
     assert mc.label_branch("feat/x", "basename", "salt") == "feat/x"

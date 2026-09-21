@@ -36,7 +36,7 @@ from pathlib import Path
 from typing import Iterator, Optional
 from urllib.parse import urlparse
 
-VERSION = "0.3.2"
+VERSION = "0.3.3"
 BATCH = 1000               # turns per POST
 SPOOL_MAX = 500_000        # unsent turns kept on disk before the oldest are dropped
 HOME = Path.home()
@@ -442,6 +442,8 @@ def read_claude_code(root: Path, state: dict, full: bool) -> Iterator[dict]:
         seen = {} if offset == 0 else (state["files"].get(key) or {})
         focus, start = seen.get("focus"), seen.get("start")
         for end, event in _lines(fp, offset):
+            if start is None and event and event.get("cwd"):
+                start = project_root(event["cwd"])  # the session's first folder
             if not event or event.get("type") != "assistant":
                 continue
             msg = event.get("message") or {}
@@ -451,8 +453,6 @@ def read_claude_code(root: Path, state: dict, full: bool) -> Iterator[dict]:
                 continue
             msg_id = msg.get("id")
             cwd = event.get("cwd", "")
-            if start is None and cwd:
-                start = project_root(cwd)
             project, focus = attribute(cwd, _touched_paths(msg, cwd), focus)
             t = turn(
                 "claude-code", event.get("sessionId") or fp.stem, msg_id or uuid, project,
@@ -470,6 +470,9 @@ def read_claude_code(root: Path, state: dict, full: bool) -> Iterator[dict]:
                 merged = _merge_max(replies[k], t)
                 if t["project"] != project_root(cwd):
                     merged["project"] = t["project"]  # a later part of the reply named another repo
+                    merged.pop("branch", None)
+                    if t.get("branch"):
+                        merged["branch"] = t["branch"]
                 replies[k] = merged
             else:
                 replies[k] = t
