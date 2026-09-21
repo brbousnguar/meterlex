@@ -95,7 +95,7 @@ def test_edits_in_a_nested_repository_count_toward_it(server, tmp_path):
     f = server / "webapps" / "minerva" / "frontend" / "src" / "App.tsx"
     turns, _ = read(tmp_path, [line("u1", "m1", server, [("Edit", {"file_path": str(f)})])])
     assert turns["m1"]["project"] == str(server / "webapps" / "minerva")
-    assert turns["m1"]["branch"] == "main"
+    assert "branch" not in turns["m1"]  # ~/Server's branch names nothing in minerva
 
 
 def test_a_cd_into_a_nested_repository_counts_toward_it(server, tmp_path):
@@ -170,6 +170,16 @@ def test_head_outside_a_repository_is_no_branch(server, tmp_path):
                                line("u2", "m2", server / "webapps" / "minerva", branch="HEAD"),
                                line("u3", "m3", loose, branch="main")])
     assert [turns[k].get("branch") for k in ("m1", "m2", "m3")] == [None, None, None]
+
+
+def test_a_reply_counted_toward_another_repository_carries_no_branch(server, tmp_path):
+    minerva = server / "webapps" / "minerva"
+    turns, _ = read(tmp_path, [
+        line("u1", "m1", minerva, [("Edit", {"file_path": str(server / "CLAUDE.md")})], branch="feat/x"),
+        line("u2", "m2", minerva, [("Edit", {"file_path": str(minerva / "a.ts")})], branch="feat/x"),
+    ])
+    assert (turns["m1"]["project"], turns["m1"].get("branch")) == (str(server), None)
+    assert (turns["m2"]["project"], turns["m2"].get("branch")) == (str(minerva), "feat/x")
 
 
 def test_a_hash_machine_sends_its_branches_hashed():
