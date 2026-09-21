@@ -188,7 +188,7 @@ export interface Overview {
   busiest: Bucket | null;
 }
 
-export type Period = "weekly" | "monthly" | "yearly";
+export type Period = "daily" | "weekly" | "monthly" | "yearly";
 
 export interface MachineInfo {
   name: string;

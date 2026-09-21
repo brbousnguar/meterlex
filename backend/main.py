@@ -119,11 +119,8 @@ def _period_bounds(period: str, ref: Optional[str]):
         end = start.replace(month=start.month % 12 + 1) if start.month < 12 \
             else start.replace(year=start.year + 1, month=1)
     elif period == "daily":
-        if ref:
-            start = _midnight(_parse_date(ref))
-            end = start + timedelta(days=1)
-        else:
-            start, end = now - timedelta(days=30), now
+        start = _midnight(_parse_date(ref)) if ref else _midnight(now)
+        end = start + timedelta(days=1)
     elif period == "yearly":
         try:
             y = int(ref) if ref else now.year
@@ -138,6 +135,8 @@ def _period_bounds(period: str, ref: Optional[str]):
 def _previous_bounds(period: str, start_utc: datetime):
     """The same-length period before `start_utc`, for "vs last week" figures."""
     start = _from_utc(start_utc)
+    if period == "daily":
+        return _period_bounds("daily", (start - timedelta(days=1)).strftime("%Y-%m-%d"))
     if period == "weekly":
         return _period_bounds("weekly", (start - timedelta(days=7)).strftime("%Y-%m-%d"))
     if period == "monthly":
@@ -413,14 +412,17 @@ _TOKEN_COLS = ("input_tokens", "output_tokens", "cache_read", "cache_write", "re
 
 
 def _bucket_key(hour_utc: str, period: str) -> str:
-    """The local day (or month, over a year) an hour of UTC belongs to."""
+    """The local hour (a day view), day, or month (over a year) an hour of UTC belongs to."""
     local = _from_utc(datetime.strptime(hour_utc, "%Y-%m-%d %H"))
+    if period == "daily":
+        return local.strftime("%Y-%m-%d %H")
     return local.strftime("%Y-%m" if period == "yearly" else "%Y-%m-%d")
 
 
 def _buckets_for(period: str, start_utc: datetime, end_utc: datetime) -> list:
     """Every bucket in the period, including the empty ones, so a quiet day
-    shows as a gap in the chart instead of disappearing."""
+    (or a quiet hour, for a day view) shows as a gap in the chart instead of
+    disappearing."""
     start, end = _from_utc(start_utc), _from_utc(end_utc)
     out, cur = [], start
     if period == "yearly":
@@ -429,6 +431,11 @@ def _buckets_for(period: str, start_utc: datetime, end_utc: datetime) -> list:
             out.append(cur.strftime("%Y-%m"))
             cur = cur.replace(year=cur.year + 1, month=1) if cur.month == 12 \
                 else cur.replace(month=cur.month + 1)
+    elif period == "daily":
+        cur = start.replace(minute=0, second=0, microsecond=0)
+        while cur < end:
+            out.append(cur.strftime("%Y-%m-%d %H"))
+            cur += timedelta(hours=1)
     else:
         cur = _midnight(start)
         while cur < end:

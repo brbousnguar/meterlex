@@ -40,7 +40,7 @@ export default function Machines({ data, unit }: { data: Overview; unit: Unit })
 
                 <div>
                   <div className="card-label">
-                    {unit === "money" ? "Cost" : "Tokens"} by {data.period === "yearly" ? "month" : "day"}
+                    {unit === "money" ? "Cost" : "Tokens"} by {data.period === "yearly" ? "month" : data.period === "daily" ? "hour" : "day"}
                   </div>
                   <MachineDays series={data.series} machine={m.machine} unit={unit}
                                 fill={harness([...m.sources].sort((a, b) => b.tokens - a.tokens)[0]?.source ?? "").fill} />

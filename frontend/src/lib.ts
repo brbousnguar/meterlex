@@ -84,6 +84,7 @@ export const folderLabel = (project: string) => {
 
 /* ── Periods ──────────────────────────────────────────────────────────────── */
 export const PERIODS: { id: Period; short: string; noun: string }[] = [
+  { id: "daily",   short: "Day",   noun: "today" },
   { id: "weekly",  short: "Week",  noun: "this week" },
   { id: "monthly", short: "Month", noun: "this month" },
   { id: "yearly",  short: "Year",  noun: "this year" },
@@ -95,6 +96,10 @@ const MONTHS = ["January", "February", "March", "April", "May", "June",
 /** The ref string for a period, stepped by `delta` periods from `ref`. */
 export function stepRef(period: Period, ref: string | null, delta: number, now = new Date()): string {
   const base = refToDate(period, ref, now);
+  if (period === "daily") {
+    base.setDate(base.getDate() + delta);
+    return iso(base);
+  }
   if (period === "weekly") {
     base.setDate(base.getDate() + delta * 7);
     return iso(base);
@@ -108,7 +113,7 @@ export function stepRef(period: Period, ref: string | null, delta: number, now =
 
 function refToDate(period: Period, ref: string | null, now: Date): Date {
   if (!ref) return new Date(now);
-  if (period === "weekly") return new Date(`${ref}T12:00:00`);
+  if (period === "daily" || period === "weekly") return new Date(`${ref}T12:00:00`);
   if (period === "monthly") { const [y, m] = ref.split("-").map(Number); return new Date(y, m - 1, 15); }
   return new Date(Number(ref), 6, 1);
 }
@@ -120,6 +125,9 @@ const iso = (d: Date) =>
  *  the API actually used — never from the browser's own idea of the date. */
 export function periodLabel(period: Period, fromLocal: string, isCurrent: boolean) {
   const from = new Date(fromLocal);
+  if (period === "daily") {
+    return isCurrent ? "Today" : `${from.getDate()} ${MONTHS[from.getMonth()].slice(0, 3)} ${from.getFullYear()}`;
+  }
   if (period === "weekly") {
     if (isCurrent) return "This week";
     const to = new Date(from); to.setDate(to.getDate() + 6);
@@ -131,14 +139,16 @@ export function periodLabel(period: Period, fromLocal: string, isCurrent: boolea
 
 export function windowLabel(period: Period, fromLocal: string, toLocal: string) {
   const from = new Date(fromLocal), to = new Date(toLocal);
-  to.setDate(to.getDate() - 1);
   const d = (x: Date) => `${x.getDate()} ${MONTHS[x.getMonth()].slice(0, 3)}`;
   if (period === "yearly") return `${from.getFullYear()}`;
+  if (period === "daily") return d(from);
+  to.setDate(to.getDate() - 1);
   return `${d(from)} → ${d(to)}`;
 }
 
-/** A bucket key ("2026-09-15" or "2026-09") as a short axis label. */
+/** A bucket key ("2026-09-15 14", "2026-09-15" or "2026-09") as a short axis label. */
 export const bucketLabel = (b: string) => {
+  if (b.includes(" ")) return `${b.split(" ")[1]}h`;            // hourly bucket, a day view
   const parts = b.split("-");
   if (parts.length === 2) return MONTHS[Number(parts[1]) - 1].slice(0, 3);
   const d = new Date(`${b}T12:00:00`);
@@ -146,6 +156,11 @@ export const bucketLabel = (b: string) => {
 };
 
 export const bucketFull = (b: string) => {
+  if (b.includes(" ")) {
+    const [day, hour] = b.split(" ");
+    const d = new Date(`${day}T12:00:00`);
+    return `${hour}:00 · ${d.getDate()} ${MONTHS[d.getMonth()].slice(0, 3)}`;
+  }
   const parts = b.split("-");
   if (parts.length === 2) return `${MONTHS[Number(parts[1]) - 1]} ${parts[0]}`;
   const d = new Date(`${b}T12:00:00`);
