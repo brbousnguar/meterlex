@@ -189,7 +189,8 @@ def ingest_turns(session: Session, machine: Machine, turns: list, collector: Opt
                 row.project = row.project or t["project"]
         row.machine = machine.name
         row.origin = row.origin or t["origin"]
-        row.branch = t["branch"] if t["reattribute"] and t["branch"] else (row.branch or t["branch"])
+        # re-attribution replaces the branch too, clearing one that no longer applies
+        row.branch = t["branch"] if t["reattribute"] else (row.branch or t["branch"])
         after = tuple(getattr(row, f) for f in TOKEN_FIELDS) + (row.model_id, row.project, row.machine, row.origin, row.branch)
         if after != before:
             _price(session, row, fx)

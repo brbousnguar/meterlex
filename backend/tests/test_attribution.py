@@ -214,6 +214,9 @@ def test_a_reply_keeps_its_first_project_unless_reattributed(session):
     ingest.ingest_turns(session, m, [_turn(project="/Server/webapps/minerva", branch="main", reattribute=True)])
     row = session.exec(select(UsageTurn)).one()
     assert (row.project, row.branch) == ("/Server/webapps/minerva", "main")
+    ingest.ingest_turns(session, m, [_turn(project="/Server", reattribute=True)])  # no branch any more
+    row = session.exec(select(UsageTurn)).one()
+    assert (row.project, row.branch) == ("/Server", None)
 
 
 def test_stored_folders_resolve_only_when_this_disk_can_tell(server):
