@@ -1,19 +1,27 @@
 import type { Period, TokenSplit } from "./api";
 
 /* ── Harnesses ──────────────────────────────────────────────────────────────
-   The only entities that carry a colour (see DESIGN.md). Codex is the neutral
-   on purpose; every mark is direct-labelled, so no chart relies on colour. */
-export const HARNESS: Record<string, { label: string; fill: string; text: string; note: string }> = {
-  "claude-code": { label: "Claude Code", fill: "var(--h-claude)",      text: "var(--h-claude-text)",      note: "Claude Max" },
-  codex:         { label: "Codex",       fill: "var(--h-codex)",       text: "var(--h-codex-text)",       note: "ChatGPT" },
-  ollama:        { label: "Ollama",      fill: "var(--h-ollama)",      text: "var(--h-ollama-text)",      note: "local & cloud" },
-  antigravity:   { label: "Antigravity", fill: "var(--h-antigravity)", text: "var(--h-antigravity-text)", note: "Google" },
-  "gemini-cli":  { label: "Gemini CLI",  fill: "var(--h-gemini)",      text: "var(--h-gemini-text)",      note: "Google" },
-  copilot:       { label: "Copilot",     fill: "var(--h-copilot)",     text: "var(--h-copilot-text)",     note: "GitHub" },
-  openclaw:      { label: "OpenClaw",    fill: "var(--h-openclaw)",    text: "var(--h-openclaw-text)",    note: "your agents" },
+   The only entities that carry a colour (see DESIGN.md). Codex is the ink on
+   purpose; every mark is direct-labelled, so no chart relies on colour.
+   `fill` is for bars, dots and swatches, `text` for type on paper, and `tile`
+   with `on` for a map tile and the type it carries. */
+type Harness = { label: string; fill: string; text: string; tile: string; on: string; note: string };
+const tokens = (k: string) => ({
+  fill: `var(--h-${k})`, text: `var(--h-${k}-text)`, tile: `var(--h-${k}-tile)`, on: `var(--h-${k}-on)`,
+});
+export const HARNESS: Record<string, Harness> = {
+  "claude-code": { label: "Claude Code", ...tokens("claude"),      note: "Claude Max" },
+  codex:         { label: "Codex",       ...tokens("codex"),       note: "ChatGPT" },
+  ollama:        { label: "Ollama",      ...tokens("ollama"),      note: "local & cloud" },
+  antigravity:   { label: "Antigravity", ...tokens("antigravity"), note: "Google" },
+  "gemini-cli":  { label: "Gemini CLI",  ...tokens("gemini"),      note: "Google" },
+  copilot:       { label: "Copilot",     ...tokens("copilot"),     note: "GitHub" },
+  openclaw:      { label: "OpenClaw",    ...tokens("openclaw"),    note: "your agents" },
 };
-export const harness = (s: string) =>
-  HARNESS[s] ?? { label: s, fill: "var(--ink-3)", text: "var(--ink-2)", note: "" };
+/** A row that belongs to no harness: the uncoloured bar, the plain tile. */
+export const PLAIN = "var(--bar)";
+export const harness = (s: string): Harness =>
+  HARNESS[s] ?? { label: s, fill: PLAIN, text: "var(--ink-2)", tile: "var(--tile-none)", on: "var(--tile-none-on)", note: "" };
 
 /* ── Numbers ──────────────────────────────────────────────────────────────── */
 export const fmtTok = (n: number) =>
@@ -67,11 +75,11 @@ export const fmtMeasure = (unit: Unit, row: { tokens: number; cost_eur: number }
 
 /* ── The token split, in the order it is always shown ─────────────────────── */
 export const SPLIT: { key: keyof TokenSplit; label: string; fill: string; hint: string }[] = [
-  { key: "cache_read",       label: "Cache read",  fill: "var(--ramp-3)", hint: "context replayed from cache — cheap, and most of the volume" },
-  { key: "input_tokens",     label: "Input",       fill: "var(--ramp-2)", hint: "new prompt tokens sent" },
+  { key: "cache_read",       label: "Cache read",  fill: "var(--ramp-2)", hint: "context replayed from cache — cheap, and most of the volume" },
+  { key: "input_tokens",     label: "Input",       fill: "var(--ramp-1)", hint: "new prompt tokens sent" },
   { key: "output_tokens",    label: "Output",      fill: "var(--ramp-5)", hint: "what the model wrote back" },
   { key: "cache_write",      label: "Cache write", fill: "var(--ramp-4)", hint: "context stored for reuse" },
-  { key: "reasoning_tokens", label: "Reasoning",   fill: "var(--ramp-1)", hint: "thinking tokens, when the tool reports them" },
+  { key: "reasoning_tokens", label: "Reasoning",   fill: "var(--ramp-3)", hint: "thinking tokens, when the tool reports them" },
 ];
 
 /** Machines that report full paths send `/Users/me/Server/webapps/vitalex`;

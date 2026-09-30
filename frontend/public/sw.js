@@ -1,4 +1,4 @@
-const CACHE = 'meterlex-v1'
+const CACHE = 'meterlex-v2'
 const SHELL = ['/']
 
 self.addEventListener('install', (e) => {

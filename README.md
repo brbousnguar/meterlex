@@ -58,7 +58,8 @@ this month or this year** — periods counted in your own time zone, never UTC:
 - **Machines** — one meter per machine: its reading, its share, the shape of its
   period, when its collector last reported, and which machines went silent.
 - **Harnesses** — per tool: tokens, replies, models, list price against its fee,
-  and the token split.
+  and the token split. The tools that burned nothing in the period share one
+  card, with any fee paid anyway.
 - **Models** — every model in the period, ranked, with the harness that ran it.
 - **More** — subscriptions and FX, the collectors and their last report, and a
   link to the rate card, which lives in its own app.
@@ -173,11 +174,20 @@ backend/
   database.py       Engine, session helpers, column migrations
 frontend/
   src/
-    components/     Dashboard, ToolDetail, PricesSettings, InfoTip
+    App.tsx         Shell: header, tabs, period and unit controls
+    screens/        Now, Machines, Harnesses, Models, More
+    components/     Bars (the chart), Odometer, Treemap, charts (ranked rows, split bar)
+    index.css       The design system's tokens and components
   public/
-    brand-mark.svg  Identity mark and favicon
+    icon.svg        Identity mark; the PNG icons and favicon are rendered from it
+scripts/
+  check-bars.mjs    Browser check of the chart's readout and focus
+  ux.config.json    Screen list for the contrast, reflow and style audits
+docs/
+  meter-room.md     The previous design system, kept for the apps that still use it
 data/
   meterlex.db       SQLite database
+DESIGN.md           The design system: Atlas, cut square
 docker-compose.yml  Two-service stack (backend + nginx-served frontend)
 ```
 
@@ -266,32 +276,35 @@ The rate card itself lives in [model-prices](https://github.com/brbousnguar/mode
 
 ## Visual identity
 
-**Meter Room** — the full system, with every measured value, is in
+**Atlas, cut square** — the full system, with every measured value, is in
 [`DESIGN.md`](DESIGN.md); that file and `frontend/src/index.css` change together.
-The short version: the app is a meter, so the number is the design. Flat,
-hard-edged, separated by hairlines, with an odometer for the reading and one
-meter card per machine.
+The short version: warm drafting paper with a dot grid, everything on a card that
+lifts a little, a soft serif for every number, and no rounded corner anywhere:
+bars, tiles, controls and the drums of the reading are all cut square. The app is
+a meter, so the number is still the design.
 
-Colour means exactly two things. **Harness identity** — one measured swatch per
-tool, Codex deliberately the neutral one — and **direction**, whether the list
-price sits above or below what the subscriptions cost. Machines and models carry
-no colour; they are ranked by the number.
+Colour means exactly two things. **Harness identity** — one measured hue per
+tool, Codex deliberately the ink — and **direction**, whether the list price sits
+above or below what the subscriptions cost. Machines, models and folders carry no
+colour; they are ranked by the number. The bright fills never set small type:
+each has a deeper twin for that.
 
 | Role | Colour | Use |
 | --- | --- | --- |
-| Paper | `#fbfaf6` | Canvas (dark: `#131519`) |
-| Ink | `#151512` | Type and structure (dark: `#f2f4f7`) |
-| Claude Code | `#b4441f` | Harness identity |
-| Ollama | `#6e40c9` | Harness identity |
-| Gemini CLI | `#1b5ec4` | Harness identity |
-| Antigravity | `#0e7b3c` | Harness identity, and "under the fee" |
-| Copilot | `#8a5300` | Harness identity |
-| Codex | `#2f3a44` | Harness identity, the one without a hue |
-| Over | `#c4322b` | List price above the fees |
+| Paper | `#f7f2e8` | The sheet (cards are `#fffdf8`) |
+| Ink | `#1f2a44` | Type and structure; Codex |
+| Claude Code | `#d2643c` | Harness identity, and the clay of the mark (as type: `#a4471f`) |
+| OpenClaw | `#286f73` | Harness identity |
+| Ollama | `#8d72d4` | Harness identity (as type: `#6b55b0`) |
+| Antigravity | `#6fa87e` | Harness identity (as type: `#3f7a50`, also "under the fee") |
+| Gemini CLI | `#7faee9` | Harness identity (as type: `#3a69a6`) |
+| Copilot | `#d9a932` | Harness identity (as type: `#7a5a0c`) |
+| Over | `#b8324f` | List price above the fees |
 
-Numbers and headings are **Archivo**, body text **Hanken Grotesk**, machine names
-and model ids **IBM Plex Mono**. The mark is a dial reading part of full scale;
-the PNG icons are rendered from `frontend/public/icon.svg` with
+Numbers and headings are **Fraunces**, body text **Inter**, machine names and
+model ids **JetBrains Mono**. The theme is light only. The mark is a meter dial
+cut from paper in six flat facets on a clay tile; the PNG icons are rendered from
+`frontend/public/icon.svg` with
 `rsvg-convert -w <size> -h <size> icon.svg -o icon-<size>.png`.
 
 The app installs as a PWA: serve it over HTTPS on your private network and add it

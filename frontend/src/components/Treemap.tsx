@@ -6,6 +6,7 @@ export type Tile = {
   value: number;        // area, in the current unit
   valueText: string;
   fill: string;         // the harness that did most of the work there
+  ink: string;          // the type that fill carries
   rows: [string, string][];  // the hover readout
 };
 
@@ -78,7 +79,8 @@ export default function Treemap({ tiles, height = 300 }: { tiles: Tile[]; height
         const size = r.w >= 150 && r.h >= 92 ? "l" : r.w >= 96 && r.h >= 58 ? "m" : r.w >= 58 && r.h >= 36 ? "s" : "xs";
         return (
           <div className="tile" key={t.key} data-size={size}
-               style={{ left: r.x, top: r.y, width: Math.max(0, r.w - 2), height: Math.max(0, r.h - 2), background: t.fill }}
+               data-none={t.fill === "var(--tile-none)" ? "true" : undefined}
+               style={{ left: r.x, top: r.y, width: Math.max(0, r.w - 2), height: Math.max(0, r.h - 2), background: t.fill, color: t.ink }}
                aria-label={`${t.label}: ${t.valueText}`}
                onPointerMove={(e) => e.pointerType === "mouse" && setTip({ x: e.clientX, y: e.clientY, t })}
                onPointerLeave={() => setTip(null)}>

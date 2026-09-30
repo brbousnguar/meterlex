@@ -1,0 +1,21 @@
+{
+  "name": "meterlex",
+  "notes": "Serve a build first: node ~/Server/.claude/skills/brb-pwa-mobile-ux/scripts/serve-dist.mjs --root frontend/dist --upstream http://127.0.0.1:8692 --port 4179 (a read-only proxy to the live hub). Atlas is a light theme, so there is no dark pass. `expect` proves the walk landed on the right screen.",
+  "url": "http://127.0.0.1:4179/",
+  "viewport": { "width": 402, "height": 874, "deviceScaleFactor": 2 },
+  "settleMs": 2000,
+  "screens": [
+    { "name": "now", "click": ["[data-testid=\"tab-now\"]"], "expect": ".odo" },
+    { "name": "now-month-euros", "click": ["[data-testid=\"tab-now\"]", ".seg[aria-label=\"Period\"] button:has-text(\"Month\")", ".seg[aria-label=\"Read every figure as\"] button:has-text(\"Euros\")"], "expect": ".odo" },
+    { "name": "machines", "click": [".seg[aria-label=\"Read every figure as\"] button:has-text(\"Tokens\")", "[data-testid=\"tab-machines\"]"], "expect": ".meter" },
+    { "name": "harnesses", "click": ["[data-testid=\"tab-harnesses\"]"], "expect": "h2:has-text(\"How it was run\")" },
+    { "name": "models", "click": ["[data-testid=\"tab-models\"]"], "expect": "h2:has-text(\"Every model this period\")" },
+    { "name": "more", "click": ["[data-testid=\"tab-more\"]"], "expect": "h2:has-text(\"What you pay\")" }
+  ],
+  "desktop": { "width": 1440, "height": 900 },
+  "desktopScreens": [
+    { "name": "now", "click": ["[data-testid=\"tab-now\"]"], "expect": ".odo" },
+    { "name": "machines", "click": ["[data-testid=\"tab-machines\"]"], "expect": ".meter" },
+    { "name": "harnesses", "click": ["[data-testid=\"tab-harnesses\"]"], "expect": "h2:has-text(\"How it was run\")" }
+  ]
+}

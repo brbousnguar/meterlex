@@ -1,97 +1,92 @@
 /* ─────────────────────────────────────────────────────────────────────────────
-   METER ROOM — the Meterlex design system. See ../../DESIGN.md; this file and
-   that one change in the same commit.
+   ATLAS, CUT SQUARE — the Meterlex design system. See ../../DESIGN.md; this file
+   and that one change in the same commit.
 
-   Flat, hard-edged, hairline-separated. Colour means exactly two things:
-   harness identity (six measured swatches) and direction (over / under the
-   subscription). Machines and models carry no colour. Every colour below was
-   measured with check-palette.py against paper #FBFAF6 / ink #151512.
+   The house Atlas theme (warm drafting paper, a soft serif, cards that lift) with
+   one change: every shape is cut square. Colour still means exactly two things:
+   harness identity (seven measured swatches) and direction (over / under the
+   subscription). Machines, models and folders carry no colour. Every colour below
+   was measured with check-palette.py against paper #F7F2E8 / ink #1F2A44, and the
+   harness set with the dataviz validator.
    ───────────────────────────────────────────────────────────────────────── */
 
 :root {
-  /* Ground */
-  --paper:     #fbfaf6;
-  --surface:   #f3f1ea;
-  --surface-2: #eae7dd;
-  --ink:       #151512;
-  --ink-2:     #55514a;   /*  8.4:1 on paper */
-  --ink-3:     #6b6559;   /*  5.5:1 on paper */
-  --rule:      #d8d4c8;
-  --grid:      #e4e1d8;
+  color-scheme: light;
 
-  /* Harness identity — fills that carry white, and text on paper */
-  --h-claude:      #b4441f;
-  --h-codex:       #2f3a44;
-  --h-ollama:      #6e40c9;
-  --h-antigravity: #0e7b3c;
-  --h-gemini:      #1b5ec4;
-  --h-copilot:     #8a5300;
-  --h-openclaw:    #00747f;
+  /* Ground */
+  --paper:     #f7f2e8;   /* drafting paper */
+  --paper-top: #faf6ee;   /* the top of the sheet, and the phone header */
+  --surface:   #fffdf8;   /* cards, drums, the thumb of a control */
+  --surface-2: #efe6d6;   /* wells, tracks, cent drums */
+  --ink:       #1f2a44;   /* 12.78:1 on paper */
+  --ink-2:     #55607a;   /*  5.63:1 on paper, 6.18:1 on a card */
+  --ink-3:     #636c84;   /*  4.69:1 on paper, 5.15:1 on a card */
+  --rule:      #e3d7c2;   /* card borders and rules: decorative only */
+  --grid:      #ebe1cf;
+
+  /* The accent is the clay of the brand mark. It fills; its ink twin sets type. */
+  --accent:      #d2643c;
+  --accent-ink:  #a4471f;   /* 5.38:1 on paper, white on it 6.00:1 */
+  --butter:      #f2c14e;   /* FILL-ONLY: the one yellow */
+
+  /* Harness identity — fills for bars, dots and swatches. Validated as a set:
+     every pair is ≥ 8.1 apart under protanopia and deuteranopia, ≥ 15.2 in
+     normal vision (OKLab ΔE × 100). None of the bright ones sets small type. */
+  --h-claude:      #d2643c;
+  --h-codex:       #1f2a44;
+  --h-ollama:      #8d72d4;
+  --h-antigravity: #6fa87e;
+  --h-gemini:      #7faee9;
+  --h-copilot:     #d9a932;
+  --h-openclaw:    #286f73;
+
+  /* The same harnesses as type on paper or a card (all ≥ 4.58:1 on paper). */
+  --h-claude-text:      #a4471f;
+  --h-codex-text:       #1f2a44;
+  --h-ollama-text:      #6b55b0;
+  --h-antigravity-text: #3f7a50;
+  --h-gemini-text:      #3a69a6;
+  --h-copilot-text:     #7a5a0c;
+  --h-openclaw-text:    #286f73;
+
+  /* A map tile carries small type, so two fills step one shade deeper there
+     and each tile names the ink it carries (all ≥ 4.87:1). */
+  --h-claude-tile:      #b8532e;  --h-claude-on:      #fffdf8;
+  --h-codex-tile:       #1f2a44;  --h-codex-on:       #fffdf8;
+  --h-ollama-tile:      #7a5fc8;  --h-ollama-on:      #fffdf8;
+  --h-antigravity-tile: #6fa87e;  --h-antigravity-on: #1f2a44;
+  --h-gemini-tile:      #7faee9;  --h-gemini-on:      #1f2a44;
+  --h-copilot-tile:     #d9a932;  --h-copilot-on:     #1f2a44;
+  --h-openclaw-tile:    #286f73;  --h-openclaw-on:    #fffdf8;
+  --tile-none:          #efe6d6;  --tile-none-on:     #1f2a44;
 
   /* Direction */
-  --over:  #c4322b;
-  --under: #0e7b3c;
+  --over:       #b8324f;   /* 5.22:1 on paper */
+  --under:      #3f7a50;   /* 4.58:1 on paper */
+  --over-soft:  #f8dbe1;   --over-deep:  #8a2239;   /* the chip and its type */
+  --under-soft: #dcebdf;   --under-deep: #2f5a3b;
 
-  /* The token-split ramp: one hue, light to dark (parts of one whole) */
-  --tile-none: #55514a;   /* white on it: 6.4:1 — a folder whose harness is unknown */
-  --ramp-1: #d9d3c2;
-  --ramp-2: #b3a98f;
-  --ramp-3: #8c8067;
-  --ramp-4: #655c47;
-  --ramp-5: #3d3729;
+  /* Rows that carry no harness (machines, models, folders, origins). */
+  --bar: #8f98ad;
 
-  --disp: "Archivo", -apple-system, system-ui, sans-serif;
-  --read: "Hanken Grotesk", -apple-system, system-ui, sans-serif;
-  --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
-  --r: 0px;
-  --pill: 99px;
+  /* The token-split ramp: ink wash, light to deep (parts of one whole). It is
+     ink on purpose: a hue here would claim a harness. */
+  --ramp-1: #aab4cc;   /* 2.04:1 on a card: the lightest part is still a part */
+  --ramp-2: #8894b3;
+  --ramp-3: #69769b;
+  --ramp-4: #475580;
+  --ramp-5: #1f2a44;
+
+  --disp: "Fraunces", Georgia, serif;
+  --read: "Inter", -apple-system, system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --r: 0px;   /* the cut: nothing is rounded */
+  --shadow:    0 1px 0 rgba(31, 42, 68, .04), 0 12px 30px -12px rgba(31, 42, 68, .18);
+  --shadow-sm: 0 1px 0 rgba(31, 42, 68, .04), 0 6px 14px -6px rgba(31, 42, 68, .25);
+  --shadow-up: 0 18px 36px -18px rgba(31, 42, 68, .4);
+  --ease: cubic-bezier(.2, .8, .2, 1);
   --tabs-h: 58px;
-}
-
-:root[data-theme="dark"] {
-  --paper:     #131519;
-  --surface:   #1b1f24;
-  --surface-2: #232830;
-  --ink:       #f2f4f7;
-  --ink-2:     #c3cad3;
-  --ink-3:     #98a0aa;   /*  6.9:1 on the dark ground */
-  --rule:      #2c323a;
-  --grid:      #262c34;
-
-  /* Fills keep the saturated values (they carry white on --surface);
-     text uses the brights below. Codex inverts: its light value vanishes here. */
-  --h-codex:   #55677a;
-
-  --over:  #f2705f;
-  --under: #4fbf7e;
-
-  --tile-none: #3b414b;   /* white on it: 8.4:1 */
-  --ramp-1: #3b414b;
-  --ramp-2: #565f6c;
-  --ramp-3: #737d8c;
-  --ramp-4: #939dab;
-  --ramp-5: #b6bfcb;
-}
-
-/* Text variants of the harness colours. On paper the fill doubles as text; on
-   the dark ground it cannot, so these take over. Never fill a block with one. */
-:root {
-  --h-claude-text:      #b4441f;
-  --h-codex-text:       #2f3a44;
-  --h-ollama-text:      #6e40c9;
-  --h-antigravity-text: #0e7b3c;
-  --h-gemini-text:      #1b5ec4;
-  --h-copilot-text:     #8a5300;
-  --h-openclaw-text:    #00747f;
-}
-:root[data-theme="dark"] {
-  --h-claude-text:      #f0885c;
-  --h-codex-text:       #a9bed0;
-  --h-ollama-text:      #b79bf0;
-  --h-antigravity-text: #4fbf7e;
-  --h-gemini-text:      #7fa9f0;
-  --h-copilot-text:     #d79a2b;
-  --h-openclaw-text:    #5cc7d6;
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -100,20 +95,28 @@ html { -webkit-text-size-adjust: 100%; }
 
 body {
   font-family: var(--read);
-  background: var(--paper);
   color: var(--ink);
-  font-size: 15px;
-  line-height: 1.45;
+  /* Drafting paper: a 22px dot grid over a sheet that warms towards the foot.
+     It never goes darker than --paper: every ink is measured against that. */
+  background:
+    radial-gradient(circle at 1px 1px, rgba(31, 42, 68, .07) 1px, transparent 0) 0 0 / 22px 22px,
+    linear-gradient(180deg, var(--paper-top) 0%, var(--paper) 60%);
+  background-color: var(--paper);
+  background-attachment: fixed;
+  font-size: 15.5px;
+  line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   overscroll-behavior-y: none;
 }
 
-button, input, select { font: inherit; color: inherit; }
+button, input, select { font: inherit; color: inherit; border-radius: var(--r); }
 button { background: none; border: 0; cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
 
-/* Display type carries every figure. */
+/* Display type carries every figure and every title. */
 h1, h2, h3, .fig, [data-fig] {
   font-family: var(--disp);
+  font-variation-settings: "SOFT" 50;
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.02em;
 }
@@ -128,143 +131,178 @@ h1, h2, h3, .fig, [data-fig] {
   padding-bottom: calc(var(--tabs-h) + env(safe-area-inset-bottom, 0px));
 }
 
+/* No backdrop-filter here on a phone: it would make the header the containing
+   block of the fixed tab bar inside it, and the bar would leave the viewport. */
 .topbar {
   position: sticky; top: 0; z-index: 20;
-  background: var(--paper);
+  background: var(--paper-top);
   border-bottom: 1px solid var(--rule);
   padding: calc(10px + env(safe-area-inset-top, 0px)) 16px 0;
 }
 .topbar-row { display: flex; align-items: center; gap: 12px; }
-.brand { display: flex; align-items: center; gap: 9px; margin-right: auto; min-width: 0; }
-.brand-mark { width: 27px; height: 27px; flex-shrink: 0; }
+.brand { display: flex; align-items: center; gap: 12px; margin-right: auto; min-width: 0; }
+/* The mark is the app icon as a cut tile, tilted the way the Atlas mark is. */
+.brand-mark { width: 32px; height: 32px; flex-shrink: 0; transform: rotate(-8deg); }
 .brand-name {
-  font-family: var(--disp); font-weight: 800; font-size: 1.02rem;
-  letter-spacing: .06em; text-transform: uppercase;
+  font-family: var(--disp); font-variation-settings: "SOFT" 50;
+  font-weight: 700; font-size: 1.4rem; line-height: 1.1; letter-spacing: -.01em;
 }
 .brand-kicker {
-  font-family: var(--mono); font-size: .58rem; letter-spacing: .14em;
-  text-transform: uppercase; color: var(--ink-3);
+  font-family: var(--mono); font-weight: 600; font-size: .6rem; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--accent-ink);
 }
 .icon-btn {
   display: inline-flex; align-items: center; justify-content: center;
-  min-width: 44px; min-height: 44px; color: var(--ink-2); border-radius: var(--pill);
+  min-width: 44px; min-height: 44px; color: var(--ink-2); font-size: 1.1rem;
 }
 .icon-btn:hover { color: var(--ink); }
 
-/* Period control: Week · Month · Year, with steppers. */
-.period { display: flex; align-items: center; gap: 8px; padding: 10px 0 12px; flex-wrap: wrap; }
-/* The unit toggle sits with the period controls; on a phone it takes the row
-   the period label leaves free rather than squeezing beside the steppers. */
-.period .seg + .seg { margin-left: auto; }
-@media (max-width: 560px) { .period .seg + .seg { margin-left: 0; } }
+/* Period control: Day · Week · Month · Year, with steppers, and the unit. */
+.period { display: flex; align-items: center; gap: 10px; padding: 10px 0 12px; flex-wrap: wrap; }
+.page-title { display: none; font-weight: 700; font-size: 1.7rem; line-height: 1.1; margin-right: auto; }
+
+/* Segmented control: a paper well, a card thumb that slides. The thumb is one
+   element that moves (see Seg in App.tsx); it is never rebuilt, or it jumps. */
 .seg {
-  display: inline-flex; border: 1px solid var(--rule); border-radius: var(--pill);
-  overflow: hidden; background: var(--surface);
+  position: relative; display: inline-flex; gap: 2px; padding: 3px;
+  background: var(--surface-2); border: 1px solid var(--rule);
 }
 .seg button {
-  padding: 7px 12px; min-height: 38px;
-  font-family: var(--disp); font-weight: 600; font-size: .8rem;
-  letter-spacing: .04em; text-transform: uppercase; color: var(--ink-3);
+  position: relative; z-index: 1; padding: 6px 11px; min-height: 36px;
+  font-family: var(--read); font-weight: 600; font-size: .86rem; color: var(--ink-2);
 }
-.seg button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+.seg button:hover, .seg button[aria-pressed="true"] { color: var(--ink); }
+.seg-thumb {
+  position: absolute; top: 3px; bottom: 3px; left: 0; width: 0;
+  background: var(--surface); box-shadow: var(--shadow-sm); pointer-events: none;
+}
+/* Until the thumb has been measured, the pressed button wears the card itself. */
+.seg:not([data-ready]) .seg-thumb { display: none; }
+.seg:not([data-ready]) button[aria-pressed="true"] { background: var(--surface); box-shadow: var(--shadow-sm); }
+
 .period-label {
   margin-left: auto; text-align: right; min-width: 0;
-  font-family: var(--disp); font-weight: 600; font-size: .88rem; white-space: nowrap;
-}
-@media (max-width: 480px) {
-  /* Below this the three controls and the label no longer share a line, and a
-     wrapped "14 SEP → 20 SEP" reads worse than a second row. */
-  .period-label { flex-basis: 100%; margin-left: 0; text-align: left; order: 3; }
-  .period-label small { display: inline; margin-left: 8px; }
+  font-family: var(--disp); font-variation-settings: "SOFT" 50;
+  font-weight: 650; font-size: 1.02rem; line-height: 1.2; white-space: nowrap;
 }
 .period-label small {
   display: block; font-family: var(--mono); font-weight: 400; font-size: .62rem;
   letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3);
 }
-.step {
-  min-width: 44px; min-height: 44px; border: 1px solid var(--rule);
-  border-radius: var(--pill); color: var(--ink-2);
+@media (max-width: 480px) {
+  /* Below this the controls and the label no longer share a line, and a
+     wrapped "28 SEP → 4 OCT" reads worse than the label beside the unit. */
+  .period-label small { display: inline; margin-left: 8px; }
 }
+.steps { display: flex; gap: 8px; }
+/* Steppers are Atlas buttons: an ink outline and an ink shadow that presses in. */
+.step {
+  min-width: 44px; min-height: 44px; color: var(--ink);
+  background: var(--surface); border: 1.5px solid var(--ink); box-shadow: 3px 3px 0 var(--ink);
+  font-weight: 600;
+}
+.step:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--ink); }
 .step:disabled { opacity: .35; cursor: default; }
 
 /* ── Content ────────────────────────────────────────────────────────────── */
 .content { flex: 1; padding: 16px 16px 28px; max-width: 1200px; width: 100%; margin: 0 auto; }
-.section { margin-top: 26px; }
+
+/* A section is a card. `bare` leaves its content on the paper: the stat cards
+   and the machine meters are cards themselves, and a card does not nest. */
+.section {
+  margin-top: 18px; padding: 16px 16px 18px;
+  background: var(--surface); border: 1px solid var(--rule); box-shadow: var(--shadow);
+}
+.section.bare { padding: 0; background: none; border: 0; box-shadow: none; }
+.content > .section:first-child { margin-top: 4px; }
 .section-head {
-  display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px;
-  border-bottom: 1px solid var(--rule); padding-bottom: 6px;
+  display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 12px;
+  border-bottom: 1px dashed var(--rule); padding-bottom: 10px;
 }
-.section-title {
-  font-family: var(--disp); font-weight: 700; font-size: .84rem;
-  letter-spacing: .14em; text-transform: uppercase;
-}
-.section-note { margin-left: auto; font-size: .78rem; color: var(--ink-2); }
+.section.bare > .section-head { border-bottom-style: solid; }
+.section-title { font-weight: 650; font-size: 1.22rem; line-height: 1.2; letter-spacing: -.01em; }
+.section-note { margin-left: auto; font-size: .8rem; color: var(--ink-2); }
 /* A "see all" note is still a tap target (WCAG 2.5.8). */
-button.section-note { min-height: 30px; padding: 4px 2px 4px 10px; }
+button.section-note { min-height: 30px; padding: 4px 2px 4px 10px; font-weight: 600; color: var(--accent-ink); }
 
 /* ── The reading ────────────────────────────────────────────────────────── */
-.reading { padding: 4px 0 2px; }
+.reading { padding: 6px 0 2px; }
 .reading-label {
-  font-family: var(--mono); font-size: .62rem; letter-spacing: .14em;
-  text-transform: uppercase; color: var(--ink-3);
+  font-family: var(--mono); font-weight: 600; font-size: .7rem; letter-spacing: .12em;
+  text-transform: uppercase; color: var(--accent-ink);
 }
-/* One drum per digit, sized so the whole reading fits the viewport: a meter
-   that wraps onto a second line is not a meter. */
-.odo { display: flex; align-items: stretch; gap: 3px; margin: 8px 0 6px; --drums: 9; }
+/* One drum per digit, each a small cut card, sized so the whole reading fits
+   the viewport: a meter that wraps onto a second line is not a meter. */
+.odo { display: flex; align-items: stretch; gap: 4px; margin: 10px 0 10px; --drums: 9; }
 .odo-cell {
-  font-family: var(--disp); font-weight: 800; font-variant-numeric: tabular-nums;
-  background: var(--surface); border: 1px solid var(--rule);
+  font-family: var(--disp); font-variation-settings: "SOFT" 50;
+  font-weight: 700; font-variant-numeric: tabular-nums;
+  background: var(--surface); border: 1px solid var(--rule); box-shadow: var(--shadow-sm);
   color: var(--ink);
-  min-width: 0.72em; padding: 2px 6px 4px; text-align: center;
-  font-size: min(3.4rem, calc((100vw - 52px - var(--drums) * 16px) / var(--drums)));
+  min-width: 0.72em; padding: .04em .18em .1em; text-align: center;
+  font-size: min(3.4rem, calc((100vw - 170px) / (var(--drums) * 1.1)));
   line-height: 1.05;
 }
-.odo-cell[data-lead="true"] { color: var(--ink-3); background: var(--paper); }
-.odo-cell[data-cents="true"] { color: var(--ink-3); background: var(--paper); }
-.odo-dot { align-self: flex-end; width: .42rem; height: .42rem; margin: 0 2px .7rem; background: var(--ink-3); }
+/* On a phone the label above already says the unit, so the drums take its room. */
+@media (max-width: 479px) {
+  .odo:not(.odo-small) .odo-unit { display: none; }
+  .odo:not(.odo-small) .odo-cell { font-size: min(3.4rem, calc((100vw - 120px) / (var(--drums) * 1.1))); }
+}
+/* Leading zeros and cents sit back in a well; --ink-2 on it is 5.08:1. */
+.odo-cell[data-lead="true"], .odo-cell[data-cents="true"] { color: var(--ink-2); background: var(--surface-2); box-shadow: none; }
+.odo-dot { align-self: flex-end; width: .42rem; height: .42rem; margin: 0 2px .7rem; background: var(--accent); }
 .odo-small .odo-dot { width: .22rem; height: .22rem; margin-bottom: .34rem; }
-.odo-gap { width: 6px; }
+.odo-gap { width: 5px; }
 /* The size of the reading is said once, in the label above it — the drums are left alone. */
 /* Inside a meter card the drums are smaller, and they still size themselves:
    a ten-digit monthly reading must fit a 320px phone. */
-.odo-small { gap: 2px; }
+.odo-small { gap: 2px; margin: 0; }
 .odo-small .odo-cell {
   /* Each drum also costs its padding, border and gap — about 8px — so that
      comes off the digit itself, or ten drums overflow a 320px phone. */
-  font-size: min(1.45rem, max(0.6rem, calc((100vw - 90px) / var(--drums) - 8px)));
-  padding: 1px 3px 2px;
+  font-size: min(1.45rem, max(0.6rem, calc((100vw - 110px) / var(--drums) - 8px)));
+  padding: 1px 3px 2px; box-shadow: none;
 }
 .odo-small .odo-gap { width: 4px; }
 .odo-unit {
-  align-self: flex-end; padding-bottom: 8px;
-  font-family: var(--mono); font-size: .68rem; letter-spacing: .12em;
+  align-self: flex-end; padding: 0 0 8px 4px;
+  font-family: var(--mono); font-weight: 600; font-size: .68rem; letter-spacing: .12em;
   text-transform: uppercase; color: var(--ink-3);
 }
+.reading-meta { display: flex; gap: 8px 12px; align-items: center; flex-wrap: wrap; }
 .delta {
-  display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px;
-  border-radius: var(--pill); border: 1px solid var(--rule);
-  font-family: var(--disp); font-weight: 600; font-size: .8rem;
+  display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px;
+  border: 1px solid var(--rule); background: var(--surface);
+  font-weight: 600; font-size: .8rem;
 }
-.delta[data-dir="up"] { color: var(--over); border-color: currentColor; }
-.delta[data-dir="down"] { color: var(--under); border-color: currentColor; }
+.delta span { font-weight: 500; }
+.delta[data-dir="up"] { background: var(--over-soft); border-color: transparent; color: var(--over-deep); }
+.delta[data-dir="down"] { background: var(--under-soft); border-color: transparent; color: var(--under-deep); }
 
-/* ── Stat rail: two-up on a phone, four-up on a desktop ─────────────────── */
+/* ── Stat rail: two-up on a phone, four-up on a desktop ─────────────────────
+   Inside a card it is a ruled grid; `lift` (the Now screen, on the paper)
+   makes each stat a card of its own. */
 .rail { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; background: var(--rule); border: 1px solid var(--rule); }
-.stat { background: var(--paper); padding: 12px 14px; min-width: 0; }
+.stat { background: var(--surface); padding: 12px 14px; min-width: 0; }
+.rail.lift { gap: 12px; background: none; border: 0; }
+.rail.lift .stat { border: 1px solid var(--rule); box-shadow: var(--shadow); padding: 14px 16px; }
 .stat-label {
-  font-family: var(--mono); font-size: .6rem; letter-spacing: .12em;
+  font-family: var(--mono); font-weight: 600; font-size: .62rem; letter-spacing: .12em;
   text-transform: uppercase; color: var(--ink-3);
 }
-.stat-value { font-family: var(--disp); font-weight: 700; font-size: 1.7rem; margin-top: 3px; font-variant-numeric: tabular-nums; }
-.stat-sub { font-size: .78rem; color: var(--ink-2); margin-top: 3px; }
+.stat-value {
+  font-family: var(--disp); font-variation-settings: "SOFT" 50;
+  font-weight: 700; font-size: 1.75rem; line-height: 1.2; margin-top: 4px; font-variant-numeric: tabular-nums;
+}
+.stat-sub { font-size: .8rem; color: var(--ink-2); margin-top: 2px; }
 .stat-value.over { color: var(--over); }
 .stat-value.under { color: var(--under); }
 
 /* ── Split bar (parts of one whole) ─────────────────────────────────────── */
-.split { display: flex; width: 100%; height: 26px; gap: 2px; background: var(--paper); }
+.split { display: flex; width: 100%; height: 26px; gap: 2px; }
 .split-seg { min-width: 2px; }
-.split-legend { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 10px; }
-.split-legend li { list-style: none; display: flex; align-items: center; gap: 7px; font-size: .8rem; }
+.split-legend { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 12px; }
+.split-legend li { list-style: none; display: flex; align-items: center; gap: 7px; font-size: .82rem; }
 .swatch { width: 11px; height: 11px; flex-shrink: 0; }
 .split-legend b { font-family: var(--disp); font-variant-numeric: tabular-nums; }
 .split-legend span { color: var(--ink-3); }
@@ -272,31 +310,44 @@ button.section-note { min-height: 30px; padding: 4px 2px 4px 10px; }
 /* ── Ranked rows (harnesses, models, projects) ──────────────────────────── */
 .rank { display: flex; flex-direction: column; }
 .rank-row {
-  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px;
-  align-items: center; padding: 11px 0; border-bottom: 1px solid var(--rule);
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 5px 12px;
+  align-items: center; padding: 12px 0; border-bottom: 1px dashed var(--rule);
   width: 100%; text-align: left;
 }
-.rank-row:last-child { border-bottom: 0; }
+.rank-row:first-child { padding-top: 2px; }
+.rank-row:last-child { border-bottom: 0; padding-bottom: 2px; }
 .rank-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .rank-name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dot { width: 10px; height: 10px; flex-shrink: 0; }
-.rank-value { font-family: var(--disp); font-weight: 700; font-size: 1.05rem; font-variant-numeric: tabular-nums; }
-.rank-sub { font-size: .78rem; color: var(--ink-2); }
-.rank-bar { grid-column: 1 / -1; height: 6px; background: var(--surface-2); }
-.rank-bar i { display: block; height: 100%; }
+.rank-value {
+  font-family: var(--disp); font-variation-settings: "SOFT" 50;
+  font-weight: 700; font-size: 1.08rem; font-variant-numeric: tabular-nums;
+}
+.rank-value.over { color: var(--over); }
+.rank-value.under { color: var(--under); }
+.rank-sub { font-size: .8rem; color: var(--ink-2); }
+/* A bar split by harness lays its parts in a row, never one under another. */
+.rank-bar { grid-column: 1 / -1; display: flex; height: 8px; background: var(--surface-2); overflow: hidden; }
+.rank-bar i { display: block; height: 100%; flex: none; }
 
 /* ── Meter card (one machine) ───────────────────────────────────────────── */
-.meters { display: grid; gap: 1px; background: var(--rule); border: 1px solid var(--rule); }
-.meter { background: var(--paper); padding: 14px; display: grid; gap: 10px; }
+.meters { display: grid; gap: 16px; align-items: start; }
+.meter {
+  background: var(--surface); border: 1px solid var(--rule); box-shadow: var(--shadow);
+  padding: 16px; display: grid; gap: 12px; align-content: start; min-width: 0;
+}
 .meter-head { display: flex; align-items: baseline; gap: 10px; }
-.meter-name { font-family: var(--mono); font-size: .86rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.meter-reading { margin-left: auto; font-family: var(--disp); font-weight: 700; font-size: 1.35rem; font-variant-numeric: tabular-nums; }
-.meter-foot { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: .76rem; color: var(--ink-3); }
+.meter-name { font-family: var(--mono); font-weight: 600; font-size: .88rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.meter-reading {
+  margin-left: auto; font-family: var(--disp); font-variation-settings: "SOFT" 50;
+  font-weight: 700; font-size: 1.45rem; font-variant-numeric: tabular-nums;
+}
+.meter-foot { display: flex; align-items: center; gap: 6px 12px; flex-wrap: wrap; font-size: .78rem; color: var(--ink-3); }
 .live {
   display: inline-flex; align-items: center; gap: 6px;
-  font-family: var(--mono); font-size: .64rem; letter-spacing: .1em; text-transform: uppercase;
+  font-family: var(--mono); font-size: .64rem; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3);
 }
-.live::before { content: ""; width: 7px; height: 7px; border-radius: var(--pill); background: var(--ink-3); }
+.live::before { content: ""; width: 7px; height: 7px; flex-shrink: 0; background: var(--ink-3); }
 .live[data-state="live"] { color: var(--under); }
 .live[data-state="live"]::before { background: var(--under); }
 .live[data-state="stale"] { color: var(--over); }
@@ -305,75 +356,84 @@ button.section-note { min-height: 30px; padding: 4px 2px 4px 10px; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip {
   display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px;
-  border: 1px solid var(--rule); border-radius: var(--pill);
-  font-size: .72rem; color: var(--ink-2);
+  border: 1px solid var(--rule); background: var(--surface);
+  font-size: .74rem; font-weight: 500; color: var(--ink-2);
 }
 
 /* A ranked strip inside a meter card: what that machine worked in, and which
    tools ran there. Same form as the page-level rank rows, one size down. */
-.mini-rank { list-style: none; display: grid; gap: 7px; }
-.mini-rank li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; align-items: baseline; }
+.mini-rank { list-style: none; display: grid; gap: 8px; margin-top: 6px; }
+.mini-rank li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 10px; align-items: baseline; }
 .mini-name {
   font-family: var(--mono); font-size: .78rem; min-width: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.mini-value { font-family: var(--disp); font-weight: 600; font-size: .8rem; font-variant-numeric: tabular-nums; }
-.mini-bar { grid-column: 1 / -1; display: block; height: 4px; background: var(--surface-2); }
+.mini-value { font-family: var(--disp); font-weight: 650; font-size: .86rem; font-variant-numeric: tabular-nums; }
+.mini-bar { grid-column: 1 / -1; display: block; height: 5px; background: var(--surface-2); }
 .mini-bar i { display: block; height: 100%; }
 .card-label {
-  font-family: var(--mono); font-size: .58rem; letter-spacing: .12em;
+  font-family: var(--mono); font-weight: 600; font-size: .6rem; letter-spacing: .12em;
   text-transform: uppercase; color: var(--ink-3);
 }
 
-/* ── Tabs: bottom bar on a phone, a rule of tabs on a desktop ───────────── */
+/* ── Tabs: a bottom bar on a phone, a well in the header on a desktop ───────
+   The thumb is one element that slides to the current tab: a clay rule on the
+   bar, a card in the well. */
 .tabs {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
   display: grid; grid-auto-flow: column; grid-auto-columns: 1fr;
-  background: var(--paper); border-top: 1px solid var(--rule);
+  background: var(--paper-top); border-top: 1px solid var(--rule);
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 .tab {
+  position: relative; z-index: 1;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 3px; min-height: var(--tabs-h); color: var(--ink-3);
-  font-family: var(--disp); font-weight: 600; font-size: .64rem;
-  letter-spacing: .08em; text-transform: uppercase;
-  border-top: 2px solid transparent;
+  gap: 3px; min-height: var(--tabs-h); color: var(--ink-2);
+  font-family: var(--read); font-weight: 600; font-size: .68rem;
 }
 .tab svg { width: 20px; height: 20px; }
-.tab[aria-current="page"] { color: var(--ink); border-top-color: var(--h-claude); }
+.tab[aria-current="page"] { color: var(--ink); }
+.tabs-thumb { position: absolute; top: -1px; left: 0; width: 0; height: 3px; background: var(--accent); pointer-events: none; }
+.tabs:not([data-ready]) .tabs-thumb { display: none; }
+.tabs:not([data-ready]) .tab[aria-current="page"] { box-shadow: inset 0 3px 0 var(--accent); }
 
 /* ── Forms (settings) ───────────────────────────────────────────────────── */
-.field { display: grid; gap: 4px; padding: 11px 0; border-bottom: 1px solid var(--rule); }
-.field label { font-size: .82rem; color: var(--ink-2); }
+.field { display: grid; gap: 5px; padding: 11px 0; border-bottom: 1px dashed var(--rule); }
+.field label { font-size: .84rem; font-weight: 500; color: var(--ink-2); }
 .field input {
   font-size: 16px;                 /* below 16px, iOS zooms the page on focus */
-  font-family: var(--disp); font-variant-numeric: tabular-nums;
-  background: var(--surface); border: 1px solid var(--rule);
-  padding: 9px 11px; min-height: 42px; width: 100%;
+  font-family: var(--disp); font-weight: 600; font-variant-numeric: tabular-nums;
+  background: var(--paper-top); border: 1px solid var(--rule);
+  padding: 9px 11px; min-height: 44px; width: 100%;
 }
-.field input:focus-visible { outline: 2px solid var(--h-claude); outline-offset: 1px; }
-.hint { font-size: .76rem; color: var(--ink-3); }
+.field input:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 1px; }
+.hint { font-size: .78rem; color: var(--ink-3); }
 
+/* A way out, or an action: the Atlas button. */
 .linkout {
-  display: flex; align-items: center; gap: 12px; padding: 14px;
-  border: 1px solid var(--rule); background: var(--surface);
-  color: inherit; text-decoration: none; min-height: 56px;
+  display: flex; align-items: center; gap: 12px; padding: 13px 15px;
+  background: var(--surface); border: 1.5px solid var(--ink); box-shadow: 3px 3px 0 var(--ink);
+  color: inherit; text-decoration: none; min-height: 52px; text-align: left;
 }
-.linkout b { font-family: var(--disp); }
-.linkout span { font-size: .78rem; color: var(--ink-3); display: block; }
-.linkout::after { content: "↗"; margin-left: auto; color: var(--ink-3); }
+.linkout b { font-weight: 650; }
+.linkout span { font-size: .8rem; color: var(--ink-2); display: block; margin-top: 2px; }
+a.linkout::after { content: "↗"; margin-left: auto; color: var(--accent-ink); font-weight: 600; }
+.linkout:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--ink); }
+.linkout:disabled { opacity: .35; cursor: default; }
+.actions { display: flex; gap: 12px; margin-top: 16px; flex-wrap: wrap; }
+.actions .linkout { flex: 1; min-width: 150px; justify-content: center; }
 
-.empty { padding: 26px 0; color: var(--ink-3); font-size: .88rem; }
-.err { color: var(--over); font-size: .84rem; padding: 10px 0; }
+.empty { padding: 26px 0; color: var(--ink-3); font-size: .9rem; }
+.err { color: var(--over); font-size: .86rem; padding: 10px 0; }
 
-/* ── Bars: one series, the busiest in ink; the plot is the hit target ────── */
-.bars { position: relative; }
+/* ── Bars: square, stacked by harness; the plot is the hit target ────────── */
+.bars { position: relative; --bar-gap: clamp(2px, 1.1%, 8px); }
 .bars-body { position: relative; margin-left: 50px; }
-.bars-plot { position: relative; display: flex; align-items: flex-end; gap: 3px; touch-action: pan-y; cursor: default; }
-.bars-plot:focus-visible { outline: 2px solid var(--h-claude); outline-offset: 4px; }
+.bars-plot { position: relative; display: flex; align-items: flex-end; gap: var(--bar-gap); touch-action: pan-y; cursor: default; }
+.bars-plot:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 4px; }
 .bars-grid { position: absolute; inset: 0; pointer-events: none; }
-.bars-grid div { position: absolute; left: 0; right: 0; border-top: 1px solid var(--grid); }
-.bars-grid div[data-zero] { border-top-color: var(--rule); }
+.bars-grid div { position: absolute; left: 0; right: 0; border-top: 1px dashed var(--grid); }
+.bars-grid div[data-zero] { border-top: 1px solid var(--rule); }
 .bars-grid span {
   position: absolute; right: calc(100% + 8px); transform: translateY(-50%);
   font-family: var(--mono); font-size: .62rem; color: var(--ink-3); white-space: nowrap;
@@ -382,16 +442,22 @@ button.section-note { min-height: 30px; padding: 4px 2px 4px 10px; }
   position: relative; flex: 1; min-width: 0; height: 100%;
   display: flex; flex-direction: column-reverse; justify-content: flex-start; gap: 2px;
 }
-.bars-col i { display: block; width: 100%; background: var(--ink-3); flex: none; }
+.bars-col i { display: block; width: 100%; background: var(--bar); flex: none; }
 /* A part is its own target: pointing at one focuses that harness in every bar. */
 .bars-plot[data-focusing="true"] .part { opacity: .24; }
 .bars-plot[data-focusing="true"] .part[data-on="true"] { opacity: 1; outline: 1.5px solid var(--ink); outline-offset: -1.5px; }
-@media (prefers-reduced-motion: no-preference) { .part { transition: opacity .12s ease; } }
 .bars-col i[data-peak="true"] { background: var(--ink); }
 .bars-col i[data-empty="true"] { height: 2px; background: var(--rule); }
-.bars-col[data-picked="true"] { box-shadow: inset 0 -3px 0 var(--h-claude); }
-.bars-col[data-picked="true"] i:not([data-peak="true"]):not([data-empty="true"]) { background: var(--ink-2); }
-.bars-axis { display: flex; gap: 3px; margin-top: 6px; }
+/* The picked column is underlined in ink, between the bar and its label. */
+.bars-col[data-picked="true"]::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: -6px; height: 3px; background: var(--ink);
+}
+/* On a desktop the chart is only marked while it is being read. */
+@media (min-width: 720px) {
+  .readout:not(.readout-inline)[data-show="false"] ~ .bars-body .bars-col[data-picked="true"]::after { display: none; }
+}
+.bars-col[data-picked="true"] i:not(.part):not([data-empty="true"]) { filter: saturate(1.1) brightness(.94); }
+.bars-axis { display: flex; gap: var(--bar-gap); margin-top: 11px; }
 .bars-axis span {
   flex: 1; min-width: 0; display: flex; justify-content: center;
   font-family: var(--mono); font-size: .62rem; color: var(--ink-3); white-space: nowrap;
@@ -400,111 +466,157 @@ button.section-note { min-height: 30px; padding: 4px 2px 4px 10px; }
    leaves with it, so it never sits over the bars on its own. */
 .readout {
   position: absolute; top: 0; left: 0; width: 240px; z-index: 3;
-  background: var(--paper); border: 1px solid var(--ink); padding: 9px 11px;
-  font-size: .8rem; pointer-events: none;
+  background: var(--surface); border: 1px solid var(--rule); box-shadow: var(--shadow-up);
+  padding: 11px 13px; font-size: .8rem; pointer-events: none;
 }
 .readout[data-show="false"] { opacity: 0; visibility: hidden; }
-@media (prefers-reduced-motion: no-preference) { .readout { transition: opacity .1s ease; } }
 .ro-focus { display: flex; align-items: center; gap: 7px; font-family: var(--mono); font-size: .76rem; margin-top: 3px; }
 .ro-list li[data-on="true"] { background: var(--surface-2); }
 
 /* The legend focuses a harness across every bar; a tap pins it. */
-.bars-legend { list-style: none; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 14px; margin-top: 12px; }
+.bars-legend { list-style: none; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 14px; margin-top: 14px; }
 .bars-legend button {
   width: 100%; min-height: 32px; padding: 2px 6px; text-align: left;
   display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; gap: 7px; align-items: center;
-  font-size: .78rem; border: 1px solid transparent;
+  font-size: .8rem; border: 1px solid transparent;
 }
 .bars-legend button[data-on="true"] { background: var(--surface-2); }
 .bars-legend button[aria-pressed="true"] { border-color: var(--ink); }
-.lg-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.lg-val { font-family: var(--disp); font-weight: 600; font-variant-numeric: tabular-nums; color: var(--ink-2); }
+.lg-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.lg-val { font-family: var(--disp); font-weight: 650; font-variant-numeric: tabular-nums; color: var(--ink-2); }
 @media (min-width: 720px) { .bars-legend { grid-template-columns: repeat(4, minmax(0, 200px)); } }
-.ro-when { font-family: var(--disp); font-weight: 700; font-size: .84rem; }
-.ro-value { font-family: var(--disp); font-weight: 800; font-size: 1.35rem; font-variant-numeric: tabular-nums; line-height: 1.15; margin-top: 2px; }
+.ro-when { font-family: var(--disp); font-variation-settings: "SOFT" 50; font-weight: 650; font-size: .9rem; }
+.ro-value {
+  font-family: var(--disp); font-variation-settings: "SOFT" 50;
+  font-weight: 700; font-size: 1.4rem; font-variant-numeric: tabular-nums; line-height: 1.15; margin-top: 2px;
+}
 .ro-line { color: var(--ink-2); }
 .ro-line b { font-family: var(--disp); color: var(--ink); font-variant-numeric: tabular-nums; }
 .ro-empty { color: var(--ink-3); margin-top: 4px; }
-.ro-list { list-style: none; margin-top: 7px; display: grid; gap: 3px; border-top: 1px solid var(--rule); padding-top: 6px; }
+.ro-list { list-style: none; margin-top: 8px; display: grid; gap: 3px; border-top: 1px dashed var(--rule); padding-top: 7px; }
 .ro-list li { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; gap: 7px; align-items: center; }
 .ro-list li.ro-sub { grid-template-columns: minmax(0, 1fr) auto; }
 .ro-name { font-family: var(--mono); font-size: .72rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ro-val { font-family: var(--disp); font-weight: 600; font-variant-numeric: tabular-nums; }
+.ro-val { font-family: var(--disp); font-weight: 650; font-variant-numeric: tabular-nums; }
 .sw { display: inline-block; width: 10px; height: 10px; flex-shrink: 0; }
 
 /* ── The folder map: area is the reading, colour is the harness ──────────── */
 .tmap { position: relative; width: 100%; }
 .tile {
-  position: absolute; overflow: hidden; padding: 6px 8px; color: #fff;
+  position: absolute; overflow: hidden; padding: 6px 8px; color: var(--surface);
   display: flex; flex-direction: column; gap: 1px;
 }
+.tile[data-none="true"] { box-shadow: inset 0 0 0 1px var(--rule); }
 .tile .k { font-family: var(--mono); font-size: .72rem; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.tile .v { font-family: var(--disp); font-weight: 700; font-size: .92rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.tile[data-size="l"] .v { font-size: 1.6rem; letter-spacing: -.02em; }
-.tile[data-size="m"] .v { font-size: 1.1rem; }
+.tile .v {
+  font-family: var(--disp); font-variation-settings: "SOFT" 50;
+  font-weight: 700; font-size: .94rem; font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.tile[data-size="l"] .v { font-size: 1.65rem; letter-spacing: -.02em; }
+.tile[data-size="m"] .v { font-size: 1.12rem; }
 .tile[data-size="xs"] .k { display: none; }
+@media (hover: hover) { .tile:hover { box-shadow: inset 0 0 0 2px var(--ink); } }
 .tip.tip-float { position: fixed; z-index: 60; pointer-events: none; }
 
 .tip {
-  background: var(--paper); border: 1px solid var(--ink); padding: 9px 11px;
-  font-size: .8rem; min-width: 150px;
+  background: var(--surface); border: 1px solid var(--rule); box-shadow: var(--shadow-up);
+  padding: 11px 13px; font-size: .8rem; min-width: 150px;
 }
-.tip-head { font-family: var(--disp); font-weight: 700; margin-bottom: 5px; }
-.tip-row { display: flex; gap: 12px; }
-.tip-row span { margin-left: auto; font-family: var(--disp); font-variant-numeric: tabular-nums; }
+.tip-head { font-family: var(--disp); font-variation-settings: "SOFT" 50; font-weight: 650; margin-bottom: 5px; }
+.tip-row { display: flex; gap: 12px; color: var(--ink-2); }
+.tip-row span { margin-left: auto; font-family: var(--disp); font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
 
 @media (min-width: 720px) {
   :root { --tabs-h: 0px; }
-  /* The header, the tabs and the content share one measure. */
-  .topbar > * { max-width: 1200px; margin: 0 auto; width: 100%; }
   .app { padding-bottom: 0; }
+  /* The header and the content share one measure. The tabs are static here, so
+     the header can be frosted paper. */
+  .topbar {
+    padding: 14px 16px 0;
+    background: rgba(250, 246, 238, .95); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  }
+  .topbar > * { max-width: 1200px; margin: 0 auto; width: 100%; }
+  .page-title { display: block; }
+  .period { padding: 12px 0 14px; }
+  .period-label { margin-left: 8px; }
+  .seg { padding: 4px; }
+  .seg button { padding: 6px 14px; }
+  .seg-thumb { top: 4px; bottom: 4px; }
   .tabs {
-    position: static; border-top: 0; border-bottom: 1px solid var(--rule);
-    grid-auto-flow: column; grid-auto-columns: max-content; justify-content: start;
-    gap: 4px; padding: 0 16px; max-width: 1200px; margin: 0 auto; width: 100%;
+    position: relative; left: auto; right: auto; bottom: auto; z-index: auto;
+    grid-auto-columns: max-content; gap: 2px; padding: 4px;
+    background: var(--surface-2); border: 1px solid var(--rule);
   }
-  .tab {
-    flex-direction: row; gap: 8px; min-height: 44px; padding: 0 14px;
-    border-top: 0; border-bottom: 2px solid transparent; font-size: .72rem;
-  }
-  .tab[aria-current="page"] { border-bottom-color: var(--h-claude); }
+  .tab { flex-direction: row; gap: 8px; min-height: 36px; padding: 0 13px; font-size: .88rem; }
+  .tab svg { width: 17px; height: 17px; }
+  .tabs-thumb { top: 4px; bottom: 4px; height: auto; background: var(--surface); box-shadow: var(--shadow-sm); }
+  .tabs:not([data-ready]) .tab[aria-current="page"] { background: var(--surface); box-shadow: var(--shadow-sm); }
   .rail { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-  .meters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .content { padding: 22px 16px 40px; }
+  .rail.lift { gap: 14px; }
+  .meters { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; }
+  .meter { padding: 20px 22px; }
+  .content { padding: 22px 16px 48px; }
+  .section { margin-top: 22px; padding: 18px 22px 22px; }
 }
+/* A narrow tablet has no room for the icons beside the brand, nor for the title. */
+@media (min-width: 720px) and (max-width: 819px) { .tab svg { display: none; } }
+@media (min-width: 720px) and (max-width: 899px) { .page-title { display: none; } }
 
 /* A tap on a phone must not leave a stuck hover state. */
 @media (hover: none) {
   .icon-btn:hover, .rank-row:hover { color: inherit; background: none; }
 }
-@media (prefers-reduced-motion: no-preference) {
-  .odo-cell { transition: color .18s ease; }
+@media (hover: hover) {
+  .step:not(:disabled):hover, .linkout:not(:disabled):hover { transform: translate(-1px, -1px); box-shadow: 4px 4px 0 var(--ink); }
+  .step:not(:disabled):active, .linkout:not(:disabled):active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--ink); }
+  button.rank-row:hover .rank-name { color: var(--accent-ink); }
 }
 
 @media (max-width: 719px) {
-  .readout { position: static; width: auto; margin-bottom: 10px; min-height: 132px; }
+  .readout { position: static; width: auto; margin-bottom: 12px; min-height: 140px; box-shadow: none; background: var(--paper-top); }
   .readout[data-show="false"] { opacity: 1; visibility: visible; }
 }
 
 /* A small multiple's readout sits above its 94px of bars, never over them. */
 .readout-inline {
-  position: static; width: auto; margin: 0 0 6px; padding: 5px 8px;
+  position: static; width: auto; margin: 6px 0 8px; padding: 6px 9px;
   display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  box-shadow: none; background: var(--paper-top);
 }
 .readout-inline[data-show="false"] { opacity: 1; visibility: visible; }
-.readout-inline .ro-value { font-size: 1rem; margin: 0; }
-.readout-inline .ro-when { font-size: .76rem; color: var(--ink-2); }
-@media (max-width: 719px) { .readout-inline { min-height: 0; } }
+.readout-inline .ro-value { font-size: 1.02rem; margin: 0; }
+.readout-inline .ro-when { font-size: .78rem; font-weight: 600; color: var(--ink-2); }
+@media (max-width: 719px) { .readout-inline { min-height: 0; margin-bottom: 8px; } }
 
-/* ── The Now screen on a desktop: two columns, so the screen is read at once ──
-   The reading, its rail and the chart stay full width; below them the folder map
-   sits beside the harness and machine readings. A phone keeps one column. */
+/* ── The Now screen on a desktop ────────────────────────────────────────────
+   The reading, its stats, the chart, the split and the folder map run the full
+   width; under the map the folder list sits beside the harness and machine
+   readings. A phone keeps one column, in the order of the markup. */
 @media (min-width: 1000px) {
-  .cols2 { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 0 34px; align-items: start; }
+  .cols2 {
+    display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 0 22px; align-items: start;
+    grid-template-areas: "map map" "folders side";
+  }
   .cols2 > * { min-width: 0; }
-  /* The map is the tall one: it takes the left column beside both readings.
-     The order in the markup is the phone's order and stays as it is. */
-  .cols2 > :nth-child(1), .cols2 > :nth-child(2) { grid-column: 2; }
-  .cols2 > :nth-child(3) { grid-column: 1; grid-row: 1 / span 2; }
-  .rail { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .cols2 > .side { grid-area: side; }
+  .cols2 > [data-slot="map"] { grid-area: map; }
+  .cols2 > [data-slot="folders"] { grid-area: folders; }
 }
+
+/* ── Motion: things settle, they do not jump ────────────────────────────────
+   The thumbs slide, bars grow from the axis, rank bars slide from the left, map
+   tiles fade in. All of it is off when the reader asked for less motion. */
+@media (prefers-reduced-motion: no-preference) {
+  .seg[data-ready] .seg-thumb, .tabs[data-ready] .tabs-thumb { transition: transform .38s var(--ease), width .38s var(--ease); }
+  .seg button, .tab { transition: color .25s; }
+  .step, .linkout { transition: transform .12s, box-shadow .12s; }
+  .odo-cell { transition: color .18s ease; }
+  .part { transition: opacity .12s ease; }
+  .readout { transition: opacity .12s ease; }
+  .bars-col { transform-origin: bottom; animation: grow .55s var(--ease) both; }
+  .rank-bar i:only-child, .mini-bar i { transform-origin: left; animation: slide .55s var(--ease) both; }
+  .tile { animation: fade .35s ease-out both; }
+}
+@keyframes grow { from { transform: scaleY(0); } }
+@keyframes slide { from { transform: scaleX(0); } }
+@keyframes fade { from { opacity: 0; } }

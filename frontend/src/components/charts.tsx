@@ -1,15 +1,14 @@
 import type { Bucket, TokenSplit } from "../api";
 import Bars, { type BarPoint } from "./Bars";
-import { bucketFull, bucketLabel, fmtEur, fmtInt, fmtTok, harness, pct, SPLIT, type Unit } from "../lib";
+import { bucketFull, bucketLabel, fmtEur, fmtInt, fmtTok, harness, pct, PLAIN, SPLIT, type Unit } from "../lib";
 
-/* Forms follow DESIGN.md → Charts. The reading over time is ONE series: the harness split and
-   the models live in the readout, because a six-colour stack fails CVD separation and answers a
-   question that does not need colour. */
+/* Forms follow DESIGN.md → Charts. The reading over time is stacked by harness; every part is
+   also named in the readout and in the legend, so nothing depends on telling two colours apart. */
 
 /** The harness that did most of a bucket's work — the bar wears its colour. */
 const leader = (b: Bucket) => {
   const [top] = Object.entries(b.by_source).sort((x, y) => y[1] - x[1]);
-  return top ? harness(top[0]).fill : "var(--ink-3)";
+  return top ? harness(top[0]).fill : PLAIN;
 };
 
 export function DayBars({ series, unit }: { series: Bucket[]; unit: Unit }) {
@@ -108,6 +107,8 @@ const sumOf = (parts: { value: number }[]) => parts.reduce((a, p) => a + p.value
 export function RankRows({ rows }: {
   rows: {
     key: string; name: React.ReactNode; value: string; sub?: string; share: number; fill: string;
+    /** A figure that is a direction: a fee that bought nothing reads `over`. */
+    tone?: "over" | "under";
     /** Split the bar by harness, the way the folder map is coloured. */
     parts?: { value: number; fill: string }[];
     onClick?: () => void;
@@ -122,16 +123,17 @@ export function RankRows({ rows }: {
           <Row className="rank-row" key={r.key} onClick={r.onClick} type={r.onClick ? "button" : undefined}>
             <div className="rank-name"><i className="dot" style={{ background: r.fill }} />{r.name}</div>
             <div style={{ textAlign: "right" }}>
-              <div className="rank-value">{r.value}</div>
+              <div className={`rank-value${r.tone ? ` ${r.tone}` : ""}`}>{r.value}</div>
               {r.sub && <div className="rank-sub">{r.sub}</div>}
             </div>
-            <div className="rank-bar">
+            {/* A row with nothing to compare (a silent machine) has no bar to draw. */}
+            {(r.share > 0 || !!r.parts?.length) && <div className="rank-bar">
               {r.parts?.length
                 ? r.parts.filter((p) => p.value > 0).map((p, i) => (
                     <i key={i} style={{ width: `${Math.max(0.5, (p.value / sumOf(r.parts!)) * Math.max(1.5, r.share))}%`, background: p.fill }} />
                   ))
                 : <i style={{ width: `${Math.max(1.5, r.share)}%`, background: r.fill }} />}
-            </div>
+            </div>}
           </Row>
         );
       })}
