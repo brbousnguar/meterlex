@@ -1,14 +1,18 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Meterlex">
-  <!-- Meter Room: a dial reading two thirds of full scale, drawn flat on paper.
+  <!-- Atlas, cut square: the clay tile of the Atlas mark, full bleed, and on it
+       a meter dial cut from paper in six flat facets. Four are read, two are
+       still to come; the ink needle casts the one butter shadow.
        Everything sits inside the maskable safe circle (r=205 at 256,256). -->
-  <rect width="512" height="512" fill="#FBFAF6"/>
+  <rect width="512" height="512" fill="#D2643C"/>
+  <!-- the reading: four facets of six -->
+  <polygon points="96,378 76,266 147,276 159,344" fill="#FFFDF8"/>
+  <polygon points="78,255 135,156 183,210 148,270" fill="#FFFDF8"/>
+  <polygon points="143,149 250,110 252,182 188,206" fill="#FFFDF8"/>
+  <polygon points="262,110 369,149 324,206 260,182" fill="#FFFDF8"/>
   <!-- full scale -->
-  <path d="M 153 379 A 146 146 0 1 1 359 379" fill="none" stroke="#D8D4C8" stroke-width="40"/>
-  <!-- the reading -->
-  <path d="M 153 379 A 146 146 0 1 1 334 153" fill="none" stroke="#B4441F" stroke-width="40"/>
-  <!-- needle and hub -->
-  <path d="M 256 276 L 323 170" stroke="#151512" stroke-width="24"/>
-  <circle cx="256" cy="276" r="26" fill="#151512"/>
-  <!-- one odometer drum, the other half of the system -->
-  <rect x="196" y="398" width="120" height="14" fill="#151512"/>
+  <polygon points="377,156 434,255 364,270 329,210" fill="#B8532E"/>
+  <polygon points="436,266 416,378 353,344 365,276" fill="#B8532E"/>
+  <!-- needle, and its cut shadow -->
+  <polygon points="365,190 248,287 247,331 290,323" fill="#F2C14E"/>
+  <polygon points="352,177 235,274 234,318 277,310" fill="#1F2A44"/>
 </svg>

@@ -2,7 +2,7 @@ import type { Overview } from "../api";
 import Odometer from "../components/Odometer";
 import { DayBars, RankRows, SplitBar } from "../components/charts";
 import Treemap, { type Tile } from "../components/Treemap";
-import { ago, bucketFull, byMeasure, change, fmtEur, fmtInt, fmtMeasure, fmtTok, folderLabel, harness, measure, moneyDrums, pct, type Unit } from "../lib";
+import { ago, bucketFull, byMeasure, change, fmtEur, fmtInt, fmtMeasure, fmtTok, folderLabel, harness, measure, moneyDrums, pct, PLAIN, type Unit } from "../lib";
 import type { Tab } from "../App";
 
 export default function Now({ data, unit, go }: { data: Overview; unit: Unit; go: (t: Tab) => void }) {
@@ -27,11 +27,11 @@ export default function Now({ data, unit, go }: { data: Overview; unit: Unit; go
         {money
           ? <Odometer value={t.cost_eur} unit="euros" digits={moneyDrums(t.cost_eur)} cents />
           : <Odometer value={t.tokens} unit="tokens" digits={data.period === "daily" ? 8 : data.period === "weekly" ? 9 : 10} />}
-        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+        <div className="reading-meta">
           {delta !== null && (
             <span className="delta" data-dir={delta >= 0 ? "up" : "down"}>
               {delta >= 0 ? "▲" : "▼"} {Math.abs(delta).toFixed(0)}%
-              <span style={{ color: "var(--ink-3)", fontWeight: 500 }}>
+              <span>
                 vs {data.period === "daily" ? "yesterday" : data.period === "weekly" ? "last week" : data.period === "monthly" ? "last month" : "last year"}
               </span>
             </span>
@@ -56,8 +56,9 @@ export default function Now({ data, unit, go }: { data: Overview; unit: Unit; go
         </div>
       </section>
 
-      <section className="section">
-        <div className="rail">
+      {/* On the paper, each stat is a card of its own. */}
+      <section className="section bare">
+        <div className="rail lift">
           <div className="stat">
             <div className="stat-label">List price</div>
             <div className="stat-value">{fmtEur(t.cost_eur)}</div>
@@ -111,6 +112,7 @@ export default function Now({ data, unit, go }: { data: Overview; unit: Unit; go
       </section>
 
       <div className="cols2">
+      <div className="side">
       <section className="section">
         <div className="section-head">
           <h2 className="section-title">Harnesses</h2>
@@ -138,13 +140,14 @@ export default function Now({ data, unit, go }: { data: Overview; unit: Unit; go
           value: fmtMeasure(unit, m),
           sub: `${fmtInt(m.turns)} replies`,
           share: pct(measure(unit, m), total),
-          fill: "var(--ink-2)",
+          fill: PLAIN,
           parts: (m.sources ?? []).map((s) => ({ value: measure(unit, s), fill: harness(s.source).fill })),
           onClick: () => go("machines"),
         }))} />
       </section>
+      </div>
 
-      <section className="section">
+      <section className="section" data-slot="map">
         <div className="section-head">
           <h2 className="section-title">Where the work happened</h2>
           <div className="section-note">area = {money ? "euros" : "tokens"} · colour = the harness that did most of it</div>
@@ -156,7 +159,8 @@ export default function Now({ data, unit, go }: { data: Overview; unit: Unit; go
             label: folderLabel(p.project),
             value: measure(unit, p),
             valueText: fmtMeasure(unit, p),
-            fill: top ? harness(top.source).fill : "var(--tile-none)",
+            fill: harness(top?.source ?? "").tile,
+            ink: harness(top?.source ?? "").on,
             rows: [
               [money ? "tokens" : "list price", money ? fmtTok(p.tokens) : fmtEur(p.cost_eur)],
               ["replies", fmtInt(p.turns)],
@@ -165,7 +169,10 @@ export default function Now({ data, unit, go }: { data: Overview; unit: Unit; go
             ],
           };
         })} />
-        <div className="section-head" style={{ marginTop: 18 }}>
+      </section>
+
+      <section className="section" data-slot="folders">
+        <div className="section-head">
           <h2 className="section-title">Top folders</h2>
           <div className="section-note">bars split by harness</div>
         </div>

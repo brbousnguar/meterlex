@@ -1,7 +1,7 @@
 import type { Overview } from "../api";
 import Odometer from "../components/Odometer";
 import { MachineDays, MiniRank, RankRows } from "../components/charts";
-import { ago, byMeasure, fmtEur, fmtInt, fmtMeasure, fmtTok, folderLabel, harness, measure, moneyDrums, pct, type Unit } from "../lib";
+import { ago, byMeasure, fmtEur, fmtInt, fmtMeasure, fmtTok, folderLabel, harness, measure, moneyDrums, pct, PLAIN, type Unit } from "../lib";
 
 /** One meter per machine: its reading for the period, its share of the wall,
  *  how many tokens it burned each day, what it worked in, and whether its
@@ -14,7 +14,8 @@ export default function Machines({ data, unit }: { data: Overview; unit: Unit })
 
   return (
     <>
-      <section className="section" style={{ marginTop: 6 }}>
+      {/* Each meter is a card, so the section itself stays on the paper. */}
+      <section className="section bare">
         <div className="section-head">
           <h2 className="section-title">Meters</h2>
           <div className="section-note">{live.length} of {rows.length} reporting this period</div>
@@ -35,7 +36,7 @@ export default function Machines({ data, unit }: { data: Overview; unit: Unit })
                   ? <Odometer value={Math.round(m.cost_eur)} small digits={moneyDrums(m.cost_eur)} />
                   : <Odometer value={m.tokens} small digits={9} />}
                 <div className="rank-bar">
-                  <i style={{ width: `${Math.max(1.5, pct(measure(unit, m), total))}%`, background: "var(--ink-2)" }} />
+                  <i style={{ width: `${Math.max(1.5, pct(measure(unit, m), total))}%`, background: PLAIN }} />
                 </div>
 
                 <div>
@@ -54,7 +55,7 @@ export default function Machines({ data, unit }: { data: Overview; unit: Unit })
                       name: <span title={p.project}>{folderLabel(p.project)}</span>,
                       value: fmtMeasure(unit, p),
                       share: pct(measure(unit, p), topFolder),
-                      fill: "var(--ink-3)",
+                      fill: PLAIN,
                     }))} />
                   </div>
                 )}
@@ -96,7 +97,7 @@ export default function Machines({ data, unit }: { data: Overview; unit: Unit })
             value: ago(m.last_seen_at).text,
             sub: m.last_seen_at ? "collector installed" : "collector never ran here",
             share: 0,
-            fill: "var(--ink-3)",
+            fill: PLAIN,
           }))} />
         </section>
       )}

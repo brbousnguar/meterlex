@@ -52,7 +52,7 @@ export default function More({ onReload }: { onReload: () => void }) {
 
   return (
     <>
-      <section className="section" style={{ marginTop: 6 }}>
+      <section className="section">
         <div className="section-head"><h2 className="section-title">Rates</h2></div>
         {cfg?.prices_url ? (
           <a className="linkout" href={cfg.prices_url} target="_blank" rel="noopener noreferrer">
@@ -106,13 +106,11 @@ export default function More({ onReload }: { onReload: () => void }) {
                      value={form.fx_rate ?? ""}
                      onChange={(e) => setForm((f) => ({ ...f, fx_rate: parseFloat(e.target.value) || 0 }))} />
             </div>
-            <div style={{ display: "flex", gap: 10, marginTop: 14, flexWrap: "wrap" }}>
-              <button className="linkout" style={{ flex: 1, minWidth: 150, justifyContent: "center" }}
-                      onClick={save} disabled={busy}>
+            <div className="actions">
+              <button className="linkout" onClick={save} disabled={busy}>
                 <b>Save</b>
               </button>
-              <button className="linkout" style={{ flex: 1, minWidth: 150, justifyContent: "center" }}
-                      onClick={recompute} disabled={busy}>
+              <button className="linkout" onClick={recompute} disabled={busy}>
                 <b>Reprice everything</b>
               </button>
             </div>

@@ -11,7 +11,7 @@ export default function Models({ data, unit }: { data: Overview; unit: Unit }) {
   return (
     <>
       {top && (
-        <section className="section" style={{ marginTop: 6 }}>
+        <section className="section">
           <div className="section-head">
             <h2 className="section-title">Most used model</h2>
             <div className="section-note">{data.totals.models} in the period</div>
