@@ -183,6 +183,203 @@ def test_openclaw_names_a_resold_model_by_its_host(tmp_path, provider, model, ex
     assert t["model_id"] == expected
 
 
+# ── Hermes Agent ─────────────────────────────────────────────────────────────
+
+HERMES_COUNTS = ("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "reasoning_tokens")
+
+
+def hermes_db(home: Path, sessions, usage=None, with_usage_table=True) -> Path:
+    """A Hermes state.db with the columns the collector reads. `sessions` rows
+    are dicts; counts default to 0."""
+    import sqlite3
+    home.mkdir(parents=True, exist_ok=True)
+    con = sqlite3.connect(home / "state.db")
+    con.execute("CREATE TABLE sessions (id TEXT PRIMARY KEY, source TEXT NOT NULL, parent_session_id TEXT, "
+                "started_at REAL NOT NULL, model TEXT, billing_provider TEXT, cwd TEXT, git_branch TEXT, "
+                + ", ".join(f"{c} INTEGER DEFAULT 0" for c in HERMES_COUNTS) + ")")
+    for s in sessions:
+        con.execute(f"INSERT INTO sessions ({', '.join(s)}) VALUES ({', '.join('?' * len(s))})", tuple(s.values()))
+    if with_usage_table:
+        con.execute("CREATE TABLE session_model_usage (session_id TEXT, model TEXT, billing_provider TEXT, "
+                    "task TEXT NOT NULL DEFAULT '', "
+                    + ", ".join(f"{c} INTEGER NOT NULL DEFAULT 0" for c in HERMES_COUNTS) + ")")
+        for u in usage or []:
+            con.execute(f"INSERT INTO session_model_usage ({', '.join(u)}) VALUES ({', '.join('?' * len(u))})",
+                        tuple(u.values()))
+    con.commit(); con.close()
+    return home / "state.db"
+
+
+SID = "20261004_114920_243d4c"
+
+
+def test_hermes_counts_a_session_per_model_and_keeps_side_work_apart(tmp_path):
+    hermes_db(tmp_path, [
+        {"id": SID, "source": "cli", "started_at": 1759578560.5, "model": "claude-sonnet-5",
+         "billing_provider": "anthropic", "cwd": "/nowhere/app", "input_tokens": 130, "output_tokens": 30,
+         "cache_read_tokens": 1000},
+    ], [
+        {"session_id": SID, "model": "claude-sonnet-5", "billing_provider": "anthropic",
+         "input_tokens": 100, "output_tokens": 20, "cache_read_tokens": 1000},
+        {"session_id": SID, "model": "qwen/qwen3.7-flash", "billing_provider": "openrouter",
+         "input_tokens": 30, "output_tokens": 10},
+        {"session_id": SID, "model": "gemini-3-flash", "billing_provider": "google", "task": "title_generation",
+         "input_tokens": 50, "output_tokens": 5},
+    ])
+    found = {t["turn_key"]: t for t in mc.read_hermes(tmp_path, new_state(), False)}
+    assert set(found) == {"session:claude-sonnet-5", "session:openrouter/qwen/qwen3.7-flash",
+                          "session:gemini-3-flash:title_generation"}
+    main = found["session:claude-sonnet-5"]
+    assert (main["source"], main["session_id"], main["snapshot"], main["origin"]) == ("hermes", SID, True, "interactive")
+    assert (main["input_tokens"], main["output_tokens"], main["cache_read"], main["total_tokens"]) == (100, 20, 1000, 1120)
+    assert main["ts"] == "2025-10-04T11:49:20.500000"
+    assert main["project"] == "/nowhere/app"
+    # the session row already holds the two main-loop rows: nothing left over
+    assert found["session:openrouter/qwen/qwen3.7-flash"]["input_tokens"] == 30
+
+
+def test_hermes_usage_the_per_model_table_missed_goes_to_the_session_model(tmp_path):
+    """A gateway writes absolute totals to the session row only."""
+    hermes_db(tmp_path, [
+        {"id": SID, "source": "telegram", "started_at": 1759578560, "model": "glm-5.2",
+         "billing_provider": "ollama", "input_tokens": 500, "output_tokens": 50},
+    ], [
+        {"session_id": SID, "model": "glm-5.2", "billing_provider": "ollama", "input_tokens": 200, "output_tokens": 20},
+    ])
+    [t] = list(mc.read_hermes(tmp_path, new_state(), False))
+    assert (t["turn_key"], t["input_tokens"], t["output_tokens"]) == ("session:ollama/glm-5.2", 500, 50)
+
+
+def test_hermes_reads_a_database_older_than_its_per_model_table(tmp_path):
+    hermes_db(tmp_path, [{"id": SID, "source": "cron", "started_at": 1759578560, "model": "nvidia/nemotron-3.5",
+                          "billing_provider": "nvidia", "input_tokens": 7, "output_tokens": 3}],
+              with_usage_table=False)
+    [t] = list(mc.read_hermes(tmp_path, new_state(), False))
+    assert (t["turn_key"], t["model_id"], t["total_tokens"], t["origin"]) == (
+        "session:nvidia/nemotron-3.5", "nvidia/nemotron-3.5", 10, "automated")
+
+
+def test_hermes_reads_every_profile_and_sends_a_session_again_only_when_it_grew(tmp_path):
+    row = {"source": "cli", "started_at": 1759578560, "model": "m", "input_tokens": 5, "output_tokens": 1}
+    hermes_db(tmp_path, [{"id": "a", **row}], with_usage_table=False)
+    hermes_db(tmp_path / "profiles" / "work", [{"id": "b", "parent_session_id": "a", **row}], with_usage_table=False)
+    state = new_state()
+    found = {t["session_id"]: t for t in mc.read_hermes(tmp_path, state, False)}
+    assert set(found) == {"a", "b"} and found["b"]["origin"] == "subagent"
+    assert list(mc.read_hermes(tmp_path, state, False)) == []
+    import sqlite3
+    con = sqlite3.connect(tmp_path / "state.db")
+    con.execute("UPDATE sessions SET output_tokens = 9 WHERE id = 'a'")
+    con.commit(); con.close()
+    [t] = list(mc.read_hermes(tmp_path, state, False))
+    assert (t["session_id"], t["output_tokens"]) == ("a", 9)
+
+
+def atif(steps, provider="nvidia", session=SID, agent="Hermes Agent"):
+    """A NeMo Relay trajectory: the Hermes session id lives in each API request id."""
+    return {
+        "schema_version": "ATIF-v1.7", "session_id": "01a106bf-5f51-7042-9bd4-69b00bc91a33",
+        "agent": {"name": agent, "version": "0.8.3", "model_name": "nvidia/nemotron-3.5-lightning-30b-a3b"},
+        "extra": {"observed_events": [
+            {"kind": "scope", "name": "hermes.session", "metadata": {"hermes.execution_surface": "cli"}},
+            {"kind": "scope", "name": "openai.chat_completions",
+             "metadata": {"api_request_id": f"{session}:8d4b:caf9:api:1", "hermes.provider": provider}},
+        ]},
+        "steps": steps,
+    }
+
+
+def agent_step(prompt, completion, cached=0, model="nvidia/nemotron-3.5-lightning-30b-a3b",
+               ts="2026-10-04T11:49:31.876102602+00:00"):
+    m = {"prompt_tokens": prompt, "completion_tokens": completion, "extra": {"total_tokens": prompt + completion}}
+    if cached:
+        m["cached_tokens"] = cached
+    return {"source": "agent", "model_name": model, "timestamp": ts, "metrics": m}
+
+
+def write_trajectory(root: Path, data, name="trajectory-01a1.json") -> Path:
+    fp = root / "artifacts" / "runs" / "r1" / "atif" / name
+    fp.parent.mkdir(parents=True, exist_ok=True)
+    fp.write_text(json.dumps(data))
+    return fp
+
+
+def test_a_relay_trajectory_counts_its_hermes_session(tmp_path):
+    write_trajectory(tmp_path, atif([
+        {"source": "user", "timestamp": "2026-10-04T11:49:20Z"},
+        agent_step(3462, 70), agent_step(3537, 39, cached=2176),
+    ]))
+    [t] = list(mc.read_hermes_relay(tmp_path, new_state(), False))
+    assert (t["source"], t["session_id"], t["turn_key"]) == ("hermes", SID, "session:nvidia/nemotron-3.5-lightning-30b-a3b")
+    # prompt_tokens counts the cached part
+    assert (t["input_tokens"], t["cache_read"], t["output_tokens"]) == (3462 + 3537 - 2176, 2176, 109)
+    assert (t["ts"], t["snapshot"], t["origin"]) == ("2026-10-04T11:49:20", True, "interactive")
+
+
+def test_a_relay_trajectory_names_a_resold_model_by_its_host(tmp_path):
+    write_trajectory(tmp_path, atif([agent_step(10, 1, model="anthropic/claude-sonnet-5")], provider="openrouter"))
+    [t] = list(mc.read_hermes_relay(tmp_path, new_state(), False))
+    assert t["model_id"] == "openrouter/anthropic/claude-sonnet-5"
+
+
+def test_relay_reads_a_trajectory_once_and_skips_other_agents(tmp_path):
+    write_trajectory(tmp_path, atif([agent_step(10, 1)]))
+    write_trajectory(tmp_path, atif([agent_step(10, 1)], agent="Other Agent"), name="trajectory-other.json")
+    state = new_state()
+    assert len(list(mc.read_hermes_relay(tmp_path, state, False))) == 1
+    assert list(mc.read_hermes_relay(tmp_path, state, False)) == []
+
+
+def test_a_session_in_both_records_is_stored_once(tmp_path):
+    """Same source, session and key: the hub keeps one row."""
+    hermes_db(tmp_path / "hermes", [
+        {"id": SID, "source": "cli", "started_at": 1759578560, "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+         "billing_provider": "nvidia", "input_tokens": 4823, "output_tokens": 109, "cache_read_tokens": 2176},
+    ], with_usage_table=False)
+    write_trajectory(tmp_path / "relay", atif([agent_step(3462, 70), agent_step(3537, 39, cached=2176)]))
+    [a] = list(mc.read_hermes(tmp_path / "hermes", new_state(), False))
+    [b] = list(mc.read_hermes_relay(tmp_path / "relay", new_state(), False))
+    assert (a["source"], a["session_id"], a["turn_key"]) == (b["source"], b["session_id"], b["turn_key"])
+    assert (a["input_tokens"], a["cache_read"], a["output_tokens"]) == (b["input_tokens"], b["cache_read"], b["output_tokens"])
+
+
+def test_relay_has_no_default_folder(tmp_path):
+    cfg = {"paths": {}}
+    assert mc.source_path(cfg, "hermes_relay") is None
+    assert mc.source_path(cfg, "hermes") == Path.home() / ".hermes"
+    cfg["paths"]["hermes_relay"] = str(tmp_path)
+    assert mc.source_path(cfg, "hermes_relay") == tmp_path
+
+
+def test_setup_points_a_source_at_a_folder(tmp_path, monkeypatch):
+    monkeypatch.setenv("METERLEX_HOME", str(tmp_path / "home"))
+    run = lambda *paths: mc.main(["setup", "--hub", "http://hub/", "--key", "k",
+                                  *[a for p in paths for a in ("--path", p)]])
+    assert run("hermes_relay=/srv/runs") == 0
+    assert mc.load_config()["paths"] == {"hermes_relay": "/srv/runs"}
+    assert run("hermes_relay=") == 0                       # back to its default
+    assert mc.load_config()["paths"] == {}
+    assert run("nonsense=/x") == 2
+
+
+def test_install_on_linux_writes_a_systemd_user_timer(tmp_path, monkeypatch):
+    monkeypatch.setenv("METERLEX_HOME", str(tmp_path / "cfg"))
+    monkeypatch.setattr(mc, "HOME", tmp_path)
+    monkeypatch.setattr(mc.sys, "platform", "linux")
+    monkeypatch.setattr(mc.shutil, "which", lambda name: "/usr/bin/" + name)
+    calls = []
+
+    class Done:
+        returncode, stdout, stderr = 0, "yes\n", ""
+
+    monkeypatch.setattr(mc.subprocess, "run", lambda cmd, **kw: calls.append(cmd) or Done())
+    assert mc.cmd_install(300) == 0
+    units = tmp_path / ".config" / "systemd" / "user"
+    assert "OnUnitActiveSec=300" in (units / "meterlex-collector.timer").read_text()
+    assert " run\n" in (units / "meterlex-collector.service").read_text()
+    assert ["systemctl", "--user", "enable", "--now", "meterlex-collector.timer"] in calls
+
+
 @pytest.mark.parametrize("path, policy, expected", [
     ("/Users/me/Server/webapps/vitalex", "full", "/Users/me/Server/webapps/vitalex"),
     ("C:\\Users\\me\\RocheBB\\webapps\\rbb-em-dashboard", "basename", "rbb-em-dashboard"),

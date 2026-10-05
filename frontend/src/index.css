@@ -39,6 +39,7 @@
   --h-gemini:      #7faee9;
   --h-copilot:     #d9a932;
   --h-openclaw:    #286f73;
+  --h-hermes:      #64307c;
 
   /* The same harnesses as type on paper or a card (all ≥ 4.58:1 on paper). */
   --h-claude-text:      #a4471f;
@@ -48,6 +49,7 @@
   --h-gemini-text:      #3a69a6;
   --h-copilot-text:     #7a5a0c;
   --h-openclaw-text:    #286f73;
+  --h-hermes-text:      #64307c;
 
   /* A map tile carries small type, so two fills step one shade deeper there
      and each tile names the ink it carries (all ≥ 4.87:1). */
@@ -58,6 +60,7 @@
   --h-gemini-tile:      #7faee9;  --h-gemini-on:      #1f2a44;
   --h-copilot-tile:     #d9a932;  --h-copilot-on:     #1f2a44;
   --h-openclaw-tile:    #286f73;  --h-openclaw-on:    #fffdf8;
+  --h-hermes-tile:      #64307c;  --h-hermes-on:      #fffdf8;
   --tile-none:          #efe6d6;  --tile-none-on:     #1f2a44;
 
   /* Direction */

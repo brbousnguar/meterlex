@@ -60,6 +60,7 @@ each hue comes in up to three cuts, because one value cannot do all three jobs:
 | Gemini CLI | `#7FAEE9` sky | `#3A69A6` 5.02 / 5.51 | `#7FAEE9` + ink 6.20:1 |
 | Copilot | `#D9A932` gold | `#7A5A0C` 5.71 / 6.27 | `#D9A932` + ink 6.57:1 |
 | OpenClaw | `#286F73` teal | `#286F73` 5.21 / 5.72 | `#286F73` + paper 5.72:1 |
+| Hermes | `#64307C` plum | `#64307C` 8.34 / 9.16 | `#64307C` + paper 9.16:1 |
 
 Tokens: `--h-<name>`, `--h-<name>-text`, `--h-<name>-tile` with `--h-<name>-on`.
 
@@ -81,6 +82,11 @@ two harnesses can end up neighbours:
   are separated by 2px of ground, and no chart asks colour alone to tell two
   harnesses apart. Codex is ink on purpose, outside the lightness band: OpenAI's
   own mark has no hue, and a seventh hue would not have separated.
+- **Hermes** (added 2026-10-05) is a deep plum one cut for all three jobs, a step
+  under the band (L 0.41) as Codex is: no muted hue inside the band kept the floors
+  against both the fills and the tiles. Adding it moves neither worst pair above;
+  its own nearest are teal at 10.8 (CVD) and ink / the lilac tile at 16.2 / 16.1
+  (normal vision), and it sits 19.1 from `--over`.
 
 Three more colours, and no others:
 
@@ -94,7 +100,7 @@ The change chip is a soft ground with a deep ink: `#8A2239` on `#F8DBE1` (6.84:1
 the reading grew, `#2F5A3B` on `#DCEBDF` (6.42:1) when it fell.
 
 **Machines, models and folders carry no colour.** They are ranked by the number, and
-their bars are `--bar`. With seven harness hues as the only hues, colour is signal.
+their bars are `--bar`. With eight harness hues as the only hues, colour is signal.
 
 ### The token split is ink
 

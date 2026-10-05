@@ -6,12 +6,12 @@ Only counts leave the machine: tool, model, time, session id, project label and
 token numbers. Prompts, replies, tool output and file contents are never read
 into what is sent. `run --dry-run` prints exactly what would go.
 
-    python meterlex_collector.py setup --hub URL --key KEY [--machine NAME] [--labels full|basename|hash]
+    python meterlex_collector.py setup --hub URL --key KEY [--machine NAME] [--labels full|basename|hash] [--path SOURCE=DIR]
     python meterlex_collector.py run [--dry-run] [--full] [--reattribute]
     python meterlex_collector.py loop [--every 300]
     python meterlex_collector.py status
     python meterlex_collector.py rollup [--apply]
-    python meterlex_collector.py install      # launchd on macOS, a Scheduled Task on Windows
+    python meterlex_collector.py install      # launchd on macOS, a Scheduled Task on Windows, a systemd timer on Linux
 
 One file, standard library only, Python 3.9+: macOS's own /usr/bin/python3 runs
 it, and so does `uv run meterlex_collector.py …` on Windows.
@@ -25,6 +25,7 @@ import os
 import platform
 import re
 import secrets
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -36,7 +37,7 @@ from pathlib import Path
 from typing import Iterator, Optional
 from urllib.parse import urlparse
 
-VERSION = "0.3.3"
+VERSION = "0.4.0"
 BATCH = 1000               # turns per POST
 SPOOL_MAX = 500_000        # unsent turns kept on disk before the oldest are dropped
 HOME = Path.home()
@@ -48,6 +49,10 @@ DEFAULT_PATHS = {
     "gemini_cli": "~/.gemini",
     "copilot": "~/.copilot",
     "openclaw": "~/.openclaw",
+    "hermes": "~/.hermes",
+    # NeMo Relay writes a Hermes run's trajectory wherever its config says, so
+    # there is no default: `setup --path hermes_relay=DIR` turns it on.
+    "hermes_relay": None,
 }
 LABELS = ("full", "basename", "hash")
 FREE_CODEX_PROVIDERS = {"ollama-launch", "ollama-launch-codex-app", "ollama"}
@@ -87,8 +92,11 @@ def load_config() -> dict:
     return cfg
 
 
-def source_path(cfg: dict, name: str) -> Path:
-    return Path(os.path.expanduser(cfg["paths"].get(name) or DEFAULT_PATHS[name]))
+def source_path(cfg: dict, name: str) -> Optional[Path]:
+    """Where a source's logs are, or None for a source with no default that
+    this machine has not pointed anywhere."""
+    path = cfg["paths"].get(name) or DEFAULT_PATHS[name]
+    return Path(os.path.expanduser(path)) if path else None
 
 
 # ── shared helpers ────────────────────────────────────────────────────────────
@@ -777,7 +785,7 @@ def _openclaw_origin(session_key: str) -> str:
     return "interactive"
 
 
-def _openclaw_model(provider: str, model_id: str) -> str:
+def _hosted_model(provider: str, model_id: str) -> str:
     """The rate card keys resold models by their host: `ollama/<m>:cloud`,
     `openrouter/<vendor>/<m>`. A model called by its own vendor keeps its id."""
     if not model_id:
@@ -820,7 +828,7 @@ def read_openclaw(root: Path, state: dict, full: bool) -> Iterator[dict]:
                 event.get("sessionId") or agent,
                 f'{event.get("runId") or "run"}:{event.get("seq")}',
                 agent,                      # the agent is the "where" of an agent run
-                _openclaw_model(event.get("provider") or "", event.get("modelId") or ""),
+                _hosted_model(event.get("provider") or "", event.get("modelId") or ""),
                 _parse_ts(event.get("ts")) or _ms_ts(created_at),
                 inp=_to_int(usage.get("input")), out=_to_int(usage.get("output")),
                 cache_read=_to_int(usage.get("cacheRead")), cache_write=_to_int(usage.get("cacheWrite")),
@@ -831,6 +839,161 @@ def read_openclaw(root: Path, state: dict, full: bool) -> Iterator[dict]:
         _mark(state, key, db, 0, watermark=newest)
 
 
+# ── Hermes Agent: ~/.hermes/state.db, and NeMo Relay trajectories ────────────
+#
+# Hermes keeps each session's usage in its own database. A run traced by NeMo
+# Relay also leaves an ATIF trajectory, and a tutorial run deletes its Hermes
+# home on exit, so the trajectory can be the only record. Both name a session
+# by Hermes's own id and count it per model under the same key, so a session
+# found in both is stored once.
+
+HERMES_AUTOMATED = {"cron", "api_server", "batch"}
+_HERMES_SESSION = re.compile(r"^(\d{8}_\d{6}_[0-9a-f]+):")
+
+
+def _hermes_origin(source: str, parent: Optional[str]) -> str:
+    if parent or source == "delegate":
+        return "subagent"
+    return "automated" if source in HERMES_AUTOMATED else "interactive"
+
+
+def _hermes_key(model: str, task: str) -> str:
+    """`task` is empty for the agent's own loop; side work (titles,
+    compression, vision) is named and kept apart."""
+    return f"session:{model}" + (f":{task}" if task else "")
+
+
+def _hermes_homes(root: Path) -> list:
+    homes = [root] + sorted(p for p in (root / "profiles").glob("*") if p.is_dir() and not p.name.startswith("."))
+    return [h / "state.db" for h in homes if (h / "state.db").exists()]
+
+
+_HERMES_FIELDS = ("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "reasoning_tokens")
+
+
+def _select(con: sqlite3.Connection, table: str, columns: tuple) -> str:
+    """SELECT the columns a table has, NULL for the ones an older Hermes did
+    not have yet."""
+    have = {r[1] for r in con.execute(f"PRAGMA table_info({table})")}
+    return "SELECT " + ", ".join(c if c in have else f"NULL AS {c}" for c in columns) + f" FROM {table}"
+
+
+def _hermes_db(db: Path) -> Iterator[dict]:
+    try:
+        con = sqlite3.connect(f"file:{db.as_posix()}?mode=ro", uri=True)
+        con.row_factory = sqlite3.Row
+        tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        sessions = {r["id"]: dict(r) for r in con.execute(_select(con, "sessions", (
+            "id", "source", "parent_session_id", "started_at", "model", "billing_provider", "cwd", "git_branch",
+            *_HERMES_FIELDS)))}
+        usage = con.execute(_select(con, "session_model_usage", (
+            "session_id", "model", "billing_provider", "task", *_HERMES_FIELDS,
+        ))).fetchall() if "session_model_usage" in tables else []
+        con.close()
+    except sqlite3.Error:
+        return
+    fields = _HERMES_FIELDS
+    parts: dict = {}           # (session, model, task) -> counts
+    main: dict = {}            # session -> its main-loop counts already split by model
+    for u in usage:
+        sid = u["session_id"]
+        if sid not in sessions:
+            continue
+        k = (sid, _hosted_model(u["billing_provider"] or "", u["model"] or ""), u["task"] or "")
+        acc = parts.setdefault(k, dict.fromkeys(fields, 0))
+        for f in fields:
+            acc[f] += _to_int(u[f])
+            if not u["task"]:
+                main.setdefault(sid, dict.fromkeys(fields, 0))[f] += _to_int(u[f])
+    # The session row holds the main loop's totals. Usage the per-model table
+    # missed (a gateway writes absolute totals; databases older than the table
+    # have none) is what remains, and goes to the session's model.
+    for sid, s in sessions.items():
+        split = main.get(sid, dict.fromkeys(fields, 0))
+        rest = {f: max(0, _to_int(s[f]) - split[f]) for f in fields}
+        if any(rest.values()):
+            acc = parts.setdefault((sid, _hosted_model(s["billing_provider"] or "", s["model"] or ""), ""),
+                                   dict.fromkeys(fields, 0))
+            for f in fields:
+                acc[f] += rest[f]
+    for (sid, model, task), c in parts.items():
+        if not any(c[f] for f in fields[:4]):
+            continue
+        s = sessions[sid]
+        cwd = s["cwd"] or ""
+        yield turn("hermes", sid, _hermes_key(model, task), project_root(cwd), model,
+                   _ms_ts(float(s["started_at"]) * 1000) if s["started_at"] else None,
+                   inp=c["input_tokens"], out=c["output_tokens"], cache_read=c["cache_read_tokens"],
+                   cache_write=c["cache_write_tokens"], reasoning=c["reasoning_tokens"], snapshot=True,
+                   origin=_hermes_origin(s["source"] or "", s["parent_session_id"]),
+                   branch=_branch(s["git_branch"], cwd))
+
+
+def read_hermes(root: Path, state: dict, full: bool) -> Iterator[dict]:
+    """One snapshot per session and model, from each Hermes home's state.db
+    (the default home and every profile)."""
+    for db in _hermes_homes(root):
+        for t in _hermes_db(db):
+            if full or _snapshot_changed(state, f"hm:{t['session_id']}:{t['turn_key']}", t):
+                yield t
+
+
+def _relay_trajectory(data: dict) -> Optional[tuple[str, str, str]]:
+    """(Hermes session id, provider, execution surface) of a Hermes ATIF
+    trajectory, or None for any other file. Relay names each API request
+    `<session>:<turn>:…`, which is where Hermes's own session id survives."""
+    if not str(data.get("schema_version", "")).startswith("ATIF") or \
+            "hermes" not in str((data.get("agent") or {}).get("name", "")).lower():
+        return None
+    events = ((data.get("extra") or {}).get("observed_events")) or []
+    session, providers, surface = None, {}, ""
+    for e in events:
+        meta = e.get("metadata") or {}
+        if not session:
+            m = _HERMES_SESSION.match(str(meta.get("api_request_id") or meta.get("turn_id") or ""))
+            session = m.group(1) if m else None
+        if meta.get("hermes.provider"):
+            providers[meta["hermes.provider"]] = providers.get(meta["hermes.provider"], 0) + 1
+        surface = surface or meta.get("hermes.execution_surface") or ""
+    provider = max(providers, key=providers.__getitem__) if providers else ""
+    return session or str(data.get("session_id") or ""), provider, surface
+
+
+def read_hermes_relay(root: Path, state: dict, full: bool) -> Iterator[dict]:
+    """One snapshot per session and model, from the ATIF trajectories NeMo
+    Relay writes for Hermes runs. The project is the repository that holds the
+    run's files."""
+    for fp in sorted(root.rglob("trajectory-*.json")):
+        key = "hr:" + fp.relative_to(root).as_posix()
+        if _incremental(state, key, fp, full) is None:
+            continue
+        data = _read_json(fp, {})
+        found = _relay_trajectory(data) if isinstance(data, dict) else None
+        _mark(state, key, fp, 0)
+        if not found or not found[0]:
+            continue
+        session, provider, surface = found
+        by_model: dict = {}
+        started = None
+        for step in data.get("steps") or []:
+            started = started or _parse_ts(step.get("timestamp"))
+            m = step.get("metrics")
+            if step.get("source") != "agent" or not isinstance(m, dict):
+                continue
+            model = _hosted_model(provider, step.get("model_name") or (data.get("agent") or {}).get("model_name") or "")
+            cached = _to_int(m.get("cached_tokens"))
+            details = ((m.get("extra") or {}).get("completion_tokens_details")) or {}
+            acc = by_model.setdefault(model, [0, 0, 0, 0])
+            acc[0] += max(0, _to_int(m.get("prompt_tokens")) - cached)   # prompt_tokens counts the cached part
+            acc[1] += _to_int(m.get("completion_tokens"))
+            acc[2] += cached
+            acc[3] += _to_int(details.get("reasoning_tokens")) if isinstance(details, dict) else 0
+        for model, (inp, out, cache_read, reasoning) in by_model.items():
+            yield turn("hermes", session, _hermes_key(model, ""), project_root(str(fp.parent)), model, started,
+                       inp=inp, out=out, cache_read=cache_read, reasoning=reasoning, snapshot=True,
+                       origin=_hermes_origin(surface, None))
+
+
 READERS = (
     ("claude_code", read_claude_code),
     ("codex", read_codex),
@@ -838,6 +1001,8 @@ READERS = (
     ("gemini_cli", read_gemini_cli),
     ("copilot", read_copilot),
     ("openclaw", read_openclaw),
+    ("hermes", read_hermes),
+    ("hermes_relay", read_hermes_relay),
 )
 
 
@@ -974,7 +1139,7 @@ def collect(cfg: dict, state: dict, full: bool, reattribute: bool = False) -> tu
     turns, counts = [], {}
     for name, reader in READERS:
         path = source_path(cfg, name)
-        if not path.exists():
+        if path is None or not path.exists():
             continue
         try:
             found = list(reader(path, state, full))
@@ -1022,6 +1187,15 @@ def cmd_setup(args) -> int:
     if args.labels not in LABELS:
         print(f"--labels must be one of {', '.join(LABELS)}", file=sys.stderr)
         return 2
+    for item in args.path or []:
+        name, sep, folder = item.partition("=")
+        if not sep or name not in DEFAULT_PATHS:
+            print(f"--path takes SOURCE=DIR, SOURCE one of {', '.join(DEFAULT_PATHS)}", file=sys.stderr)
+            return 2
+        if folder:
+            cfg["paths"][name] = folder
+        else:
+            cfg["paths"].pop(name, None)      # SOURCE= puts it back to its default
     cfg.update(hub=args.hub.rstrip("/"), key=args.key, labels=args.labels)
     if args.machine:
         cfg["machine"] = args.machine
@@ -1044,7 +1218,10 @@ def cmd_status(cfg: dict) -> int:
     print(f"  key      {'set' if cfg.get('key') else '(not set)'}")
     for name, _ in READERS:
         p = source_path(cfg, name)
-        print(f"  {name:<12} {p} {'' if p.exists() else '(absent)'}")
+        if p is None:
+            print(f"  {name:<12} (not set: setup --path {name}=DIR)")
+        else:
+            print(f"  {name:<12} {p} {'' if p.exists() else '(absent)'}")
     print(f"  files tracked {len(state.get('files', {}))}, waiting to send {spooled}")
     print(f"  last run {state.get('last_run', 'never')}, sent {state.get('last_sent', 0)}, "
           f"error {state.get('last_error') or 'none'}")
@@ -1085,7 +1262,47 @@ def cmd_install(every: int) -> int:
         )
         print(done.stdout.strip() or done.stderr.strip())
         return done.returncode
+    if sys.platform.startswith("linux") and shutil.which("systemctl"):
+        return _install_systemd(python, script, log, every)
     print(f"add to crontab: */{max(1, every // 60)} * * * * {python} {script} run >> {log} 2>&1")
+    return 0
+
+
+def _install_systemd(python: str, script: str, log: Path, every: int) -> int:
+    """A user service and its timer. A user's timers stop at logout unless
+    the account lingers, which only root can switch on."""
+    units = HOME / ".config" / "systemd" / "user"
+    units.mkdir(parents=True, exist_ok=True)
+    (units / "meterlex-collector.service").write_text(f"""[Unit]
+Description=Meterlex collector: send this machine's AI token counts to the hub
+
+[Service]
+Type=oneshot
+ExecStart={python} {script} run
+StandardOutput=append:{log}
+StandardError=append:{log}
+""", encoding="utf-8")
+    (units / "meterlex-collector.timer").write_text(f"""[Unit]
+Description=Run the Meterlex collector every {every} s
+
+[Timer]
+OnBootSec=60
+OnUnitActiveSec={every}
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+""", encoding="utf-8")
+    for cmd in (["daemon-reload"], ["enable", "--now", "meterlex-collector.timer"]):
+        done = subprocess.run(["systemctl", "--user", *cmd], capture_output=True, text=True)
+        if done.returncode:
+            print(f"systemctl --user {' '.join(cmd)}: {done.stderr.strip()}", file=sys.stderr)
+            return done.returncode
+    print(f"systemd timer meterlex-collector.timer: every {every} s, log {log}")
+    user = os.environ.get("USER", "")
+    linger = subprocess.run(["loginctl", "show-user", user, "-p", "Linger", "--value"], capture_output=True, text=True)
+    if linger.stdout.strip() != "yes":
+        print(f"it stops when you log out; to keep it running: sudo loginctl enable-linger {user}")
     return 0
 
 
@@ -1097,6 +1314,8 @@ def main(argv=None) -> int:
     s.add_argument("--key", required=True)
     s.add_argument("--machine")
     s.add_argument("--labels", default="full", help="full | basename | hash")
+    s.add_argument("--path", action="append", metavar="SOURCE=DIR",
+                   help="read a source from DIR (repeatable; SOURCE= restores the default)")
     r = sub.add_parser("run", help="one pass: read new usage and send it")
     r.add_argument("--dry-run", action="store_true", help="show what would be sent; send and save nothing")
     r.add_argument("--full", action="store_true", help="re-read every file from the start")
@@ -1107,7 +1326,8 @@ def main(argv=None) -> int:
     sub.add_parser("status", help="configuration, sources and the last run")
     ru = sub.add_parser("rollup", help="move this machine's stored folders to their repositories (history)")
     ru.add_argument("--apply", action="store_true", help="change the hub (default: report only)")
-    i = sub.add_parser("install", help="run automatically: launchd on macOS, a Scheduled Task on Windows")
+    i = sub.add_parser("install", help="run automatically: launchd on macOS, a Scheduled Task on Windows, "
+                                       "a systemd user timer on Linux")
     i.add_argument("--every", type=int, default=300)
     args = ap.parse_args(argv)
 
