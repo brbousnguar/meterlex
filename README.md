@@ -42,6 +42,7 @@ host; transcripts never leave the machine that wrote them.
 - **Ollama** — non-Claude models run through Claude Code (`ollama launch claude`: GLM, Kimi, DeepSeek, MiniMax…). Ollama Cloud models are priced at Ollama's own per-token rates from model-prices; models that ran locally are €0.
 - **Copilot CLI** — per-session, per-model token totals from `~/.copilot/session-state/*/events.jsonl` (older CLIs: `~/.copilot/data.db`), priced at each model's rate. In-editor Copilot usage is not exposed locally and is not counted. Variable subscription charges can be entered as monthly bills in Prices & settings.
 - **OpenClaw agents** — every `model.completed` event in each agent's own database (`~/.openclaw/agents/<id>/agent/openclaw-agent.sqlite`), read incrementally by the event's timestamp. The **agent is the project** (`nova`, `rex`, `forge`), the session key says whether a person, a schedule or another agent started the run, and a model someone else hosts is named by its host (`ollama/…`, `openrouter/…`) so the rate card prices it correctly. OpenClaw carries **no subscription of its own**: its agents run on the plans already counted above, mostly Claude Max.
+- **Hermes Agent** — each session's usage per model, from Hermes's own database (`~/.hermes/state.db`, and each profile's under `~/.hermes/profiles/`). Side work Hermes does with another model (titles, compression, vision) is kept apart from the agent's own loop, and usage that only the session row holds (a gateway writes running totals there) goes to the session's model. A run traced by [NeMo Relay](https://github.com/NVIDIA/nemoclaw-community) also leaves an ATIF trajectory, and the tutorial runs delete their Hermes home on exit, so the collector reads those too, from the folder given with `setup --path hermes_relay=DIR`. Both name a session by Hermes's own id and use the same key, so a session found in both is stored once. A model someone else hosts is named by its host, as for OpenClaw; NVIDIA's free endpoint has no rate and costs nothing. Hermes pays per call, so it has **no subscription**.
 - **Machines** — every turn records the machine it came from, and each machine's projects are stored as a full path, a folder name or a hash, as you choose per machine.
 
 ### What the app shows
@@ -138,8 +139,11 @@ sent; `run --dry-run` prints exactly what would go.
    python3 meterlex_collector.py setup --hub https://<hub>:5180 --key <key> --machine work-laptop --labels basename
    python3 meterlex_collector.py run --dry-run   # what would be sent
    python3 meterlex_collector.py run             # the first send
-   python3 meterlex_collector.py install         # every 5 minutes, as a launchd agent
+   python3 meterlex_collector.py install         # every 5 minutes: a launchd agent, or a systemd user timer on Linux
    ```
+
+   On Linux a user's timers stop at logout unless the account lingers
+   (`sudo loginctl enable-linger $USER`); `install` says so when it doesn't.
 
    Windows (PowerShell), with uv providing Python:
 
@@ -154,9 +158,11 @@ sent; `run --dry-run` prints exactly what would go.
 
 `status` shows the configuration, which tool folders were found, what is
 waiting to be sent and the last run. The collector reads `~/.claude/projects`,
-`~/.codex/sessions`, `~/.gemini/antigravity-cli`, `~/.gemini` and `~/.copilot`;
-set `"paths"` in its `config.json` (`~/.config/meterlex/`, or
-`%APPDATA%\meterlex\` on Windows) to point elsewhere. `manage.py machine-list`
+`~/.codex/sessions`, `~/.gemini/antigravity-cli`, `~/.gemini`, `~/.copilot`,
+`~/.openclaw` and `~/.hermes`; `setup --path SOURCE=DIR` (repeatable, `SOURCE=`
+for the default) points one elsewhere, and is the only way to turn on
+`hermes_relay`, which has no default folder. The paths live in its `config.json`
+(`~/.config/meterlex/`, or `%APPDATA%\meterlex\` on Windows). `manage.py machine-list`
 shows each machine's last report; `machine-revoke` stops a key.
 
 ## How it is put together
@@ -295,6 +301,7 @@ each has a deeper twin for that.
 | Ink | `#1f2a44` | Type and structure; Codex |
 | Claude Code | `#d2643c` | Harness identity, and the clay of the mark (as type: `#a4471f`) |
 | OpenClaw | `#286f73` | Harness identity |
+| Hermes | `#64307c` | Harness identity |
 | Ollama | `#8d72d4` | Harness identity (as type: `#6b55b0`) |
 | Antigravity | `#6fa87e` | Harness identity (as type: `#3f7a50`, also "under the fee") |
 | Gemini CLI | `#7faee9` | Harness identity (as type: `#3a69a6`) |

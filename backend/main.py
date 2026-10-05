@@ -24,7 +24,7 @@ import machines
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s %(message)s")
 log = logging.getLogger("meterlex")
 
-TOOLS = ["claude-code", "codex", "antigravity", "gemini-cli", "ollama", "copilot", "openclaw"]
+TOOLS = ["claude-code", "codex", "antigravity", "gemini-cli", "ollama", "copilot", "openclaw", "hermes"]
 
 # Periods are named in the user's own time, not UTC: a "week" that starts at
 # 02:00 Paris on Monday reads as wrong to the person looking at it.
@@ -41,6 +41,9 @@ DEFAULT_SETTINGS = {
     # OpenClaw agents run on the plans already paid for above (mostly Claude
     # Max); charging a fee here again would count it twice.
     "sub_openclaw_eur": "0.00",
+    # Hermes Agent calls each provider with an API key and pays per call (the
+    # NVIDIA endpoint it runs on is free): there is no plan to compare with.
+    "sub_hermes_eur": "0.00",
 }
 SETTING_KEYS = set(DEFAULT_SETTINGS)
 

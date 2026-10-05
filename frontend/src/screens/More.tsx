@@ -9,7 +9,8 @@ const SUBS: { key: keyof Settings; source: string }[] = [
   { key: "sub_ollama_eur",       source: "ollama" },
   { key: "sub_copilot_eur",      source: "copilot" },
   // OpenClaw has no line here: its agents run on the plans above, and a fee
-  // entered twice is a fee counted twice.
+  // entered twice is a fee counted twice. Hermes has none either: it pays
+  // each provider per call, so there is no plan to enter.
 ];
 
 /** Everything that is not a reading: the link to the rate card, what the

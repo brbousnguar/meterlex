@@ -17,6 +17,7 @@ export const HARNESS: Record<string, Harness> = {
   "gemini-cli":  { label: "Gemini CLI",  ...tokens("gemini"),      note: "Google" },
   copilot:       { label: "Copilot",     ...tokens("copilot"),     note: "GitHub" },
   openclaw:      { label: "OpenClaw",    ...tokens("openclaw"),    note: "your agents" },
+  hermes:        { label: "Hermes",      ...tokens("hermes"),      note: "API keys" },
 };
 /** A row that belongs to no harness: the uncoloured bar, the plain tile. */
 export const PLAIN = "var(--bar)";
