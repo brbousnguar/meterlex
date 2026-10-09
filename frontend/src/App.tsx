@@ -6,12 +6,14 @@ import Machines from "./screens/Machines";
 import Harnesses from "./screens/Harnesses";
 import Models from "./screens/Models";
 import More from "./screens/More";
+import Quota from "./screens/Quota";
 
-export type Tab = "now" | "machines" | "harnesses" | "models" | "more";
+export type Tab = "now" | "quota" | "machines" | "harnesses" | "models" | "more";
 
 /* Every icon is cut square, like the rest of the app. `title` heads the page on a desktop. */
 const TABS: { id: Tab; label: string; title: string; icon: JSX.Element }[] = [
   { id: "now",       label: "Now",      title: "The reading", icon: <Icon d="M3 17h4V8H3v9Zm7 0h4V4h-4v13Zm7 0h4v-6h-4v6Z" /> },
+  { id: "quota",     label: "Quota",    title: "Claude Max quota", icon: <Icon d="M3 4h18v6H3V4Zm2 2v2h8V6H5Zm-2 8h18v6H3v-6Zm2 2v2h4v-2H5Z" /> },
   { id: "machines",  label: "Machines", title: "Machines",    icon: <Icon d="M4 4h16v10H4V4Zm2 2v6h12V6H6ZM8 18h8v2H8v-2Z" /> },
   { id: "harnesses", label: "Harness",  title: "Harnesses",   icon: <Icon d="M4 4h7v16H4V4Zm9 0h7v7h-7V4Zm0 9h7v7h-7v-7Z" /> },
   { id: "models",    label: "Models",   title: "Models",      icon: <Icon d="M12 2 3 7l9 5 9-5-9-5Zm0 20 9-5v-5l-9 5-9-5v5l9 5Z" /> },
@@ -147,8 +149,9 @@ export default function App() {
           <button className="icon-btn" onClick={load} aria-label="Read the meters again" title="Refresh">↻</button>
         </div>
 
-        <div className="period">
+        <div className="period" data-fixed={tab === "quota" ? "" : undefined}>
           <h1 className="page-title">{TABS.find((t) => t.id === tab)?.title}</h1>
+          {tab !== "quota" && <>
           <Seg label="Period" value={period} options={PERIODS} onPick={pick} />
           <div className="steps">
             <button className="step" onClick={() => step(-1)} aria-label="Previous period">‹</button>
@@ -159,13 +162,15 @@ export default function App() {
             {label}
             <small>{data ? windowLabel(period, data.from_local, data.to_local) : "\u00a0"}</small>
           </div>
+          </>}
         </div>
       </header>
 
       <main className="content">
-        {error && <p className="err">The hub did not answer ({error}). Retrying every minute.</p>}
-        {!data && !error && <p className="empty">Reading the meters…</p>}
+        {error && tab !== "quota" && <p className="err">The hub did not answer ({error}). Retrying every minute.</p>}
+        {!data && !error && tab !== "quota" && <p className="empty">Reading the meters…</p>}
         {data && tab === "now"       && <Now data={data} unit={unit} go={go} />}
+        {tab === "quota"             && <Quota />}
         {data && tab === "machines"  && <Machines data={data} unit={unit} />}
         {data && tab === "harnesses" && <Harnesses data={data} unit={unit} />}
         {data && tab === "models"    && <Models data={data} unit={unit} />}
