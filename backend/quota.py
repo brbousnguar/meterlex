@@ -166,6 +166,12 @@ def view(session: Session, now: datetime, tz: ZoneInfo) -> dict:
             "pace_pct": round((i + 1) / 7 * 100, 1),
         })
 
+    # ── the window hour by hour, for the line's readout ─────────────────────
+    hourly = [0] * (7 * 24)
+    for ts, tok, *_ in turns:
+        if start <= ts < now:
+            hourly[min(len(hourly) - 1, int((ts - start) / timedelta(hours=1)))] += tok
+
     # ── when: weekday × hour over the last four weeks, local time ───────────
     grid = [[0] * 24 for _ in range(7)]
     since = now - 28 * DAY
@@ -214,6 +220,7 @@ def view(session: Session, now: datetime, tz: ZoneInfo) -> dict:
         "five_hour": five_hour,
         "history": [{"at": _iso(r.ts), "pct": r.used_pct} for r in current],
         "days": day_pts,
+        "hourly": hourly,
         "past": past,
         "avg_final_pct": round(sum(finals) / len(finals), 1) if finals else None,
         "hours": grid,

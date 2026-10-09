@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, type Quota as QuotaData } from "../api";
 import Bars, { type BarPoint } from "../components/Bars";
 import { RankRows } from "../components/charts";
+import WeekLine from "../components/WeekLine";
 import { fmtInt, fmtTok, folderLabel, harness, pct } from "../lib";
 
 /* The Claude Max weekly quota. Anthropic meters it as a percentage with a reset
@@ -9,7 +10,6 @@ import { fmtInt, fmtTok, folderLabel, harness, pct } from "../lib";
    figure to trust, the tokens are what it is made of. */
 
 const CLAUDE = harness("claude-code");
-const WEEK_MS = 7 * 24 * 3600 * 1000;
 
 function useClock(tz: string) {
   return {
@@ -131,7 +131,7 @@ function QuotaView({ q }: { q: QuotaData }) {
       <section className="section">
         <div className="section-head">
           <h2 className="section-title">The week against its pace</h2>
-          <div className="section-note">line = % used · dashes = an even week</div>
+          <div className="section-note">point at any hour</div>
         </div>
         <WeekLine q={q} />
       </section>
@@ -219,49 +219,6 @@ function Meter({ used, elapsed, projected, anchored }: { used: number | null; el
       )}
       {anchored && <i className="quota-now" style={{ left: `${elapsed}%` }}><b>now</b></i>}
     </div>
-  );
-}
-
-/** % used across the window, against the even pace (a diagonal) and where this rate lands. */
-function WeekLine({ q }: { q: QuotaData }) {
-  const W = 700, H = 220, L = 34, R = 10, T = 10, B = 26;
-  const start = Date.parse(q.window.start);
-  const now = Date.parse(q.now);
-  const top = Math.max(100, ...q.history.map((h) => h.pct), q.pace?.projected_pct ?? 0);
-  const yMax = top > 100 ? Math.ceil(top / 25) * 25 : 100;
-  const x = (ms: number) => L + ((ms - start) / WEEK_MS) * (W - L - R);
-  const y = (v: number) => T + (1 - v / yMax) * (H - T - B);
-  const pts = [{ ms: start, pct: 0 }, ...q.history.map((h) => ({ ms: Date.parse(h.at), pct: h.pct }))];
-  if (q.used_pct !== null) pts.push({ ms: now, pct: q.used_pct });
-  // straight between readings: the figure is only known when a session reads it
-  const d = pts.map((p, i) => `${i ? "L" : "M"}${x(p.ms)},${y(p.pct)}`).join("");
-  const ticks = yMax > 100 ? [0, 50, 100, yMax] : [0, 25, 50, 75, 100];
-  if (!q.anchored) return <div className="empty">The line appears with the first quota reading.</div>;
-  return (
-    <svg className="quota-line" viewBox={`0 0 ${W} ${H}`} role="img"
-         aria-label={`Quota used over the week: ${q.used_pct?.toFixed(0)}% now, ${q.window.elapsed_pct.toFixed(0)}% of the week gone`}>
-      {ticks.map((v) => (
-        <g key={v}>
-          <line x1={L} x2={W - R} y1={y(v)} y2={y(v)} className={v === 100 ? "ql-limit" : "ql-grid"} />
-          <text x={L - 6} y={y(v) + 4} textAnchor="end" className="ql-tick">{v}%</text>
-        </g>
-      ))}
-      {q.days.map((dd, i) => (
-        <text key={dd.start} x={x(start + (i + 0.5) * WEEK_MS / 7)} y={H - 8} textAnchor="middle" className="ql-tick">
-          {new Date(dd.start).toLocaleDateString("en-GB", { timeZone: q.tz, weekday: "short" })}
-        </text>
-      ))}
-      <line x1={x(start)} y1={y(0)} x2={x(start + WEEK_MS)} y2={y(100)} className="ql-pace" />
-      {q.pace?.projected_pct != null && q.used_pct !== null && (
-        <line x1={x(now)} y1={y(q.used_pct)} x2={x(start + WEEK_MS)} y2={y(q.pace.projected_pct)} className="ql-proj" />
-      )}
-      <path d={d} className="ql-used" />
-      {q.history.map((h) => (
-        <rect key={h.at} x={x(Date.parse(h.at)) - 3} y={y(h.pct) - 3} width="6" height="6" className="ql-read" />
-      ))}
-      <line x1={x(now)} x2={x(now)} y1={T} y2={H - B} className="ql-now" />
-      {q.used_pct !== null && <rect x={x(now) - 4} y={y(q.used_pct) - 4} width="8" height="8" className="ql-dot" />}
-    </svg>
   );
 }
 
