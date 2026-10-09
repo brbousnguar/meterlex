@@ -66,6 +66,7 @@ def test_pace_budget_and_tokens_left(session):
     assert (v["tokens"]["budget"], v["tokens"]["budget_from"]) == (1000, "this week")   # 600 ÷ 60%
     assert v["tokens"]["left"] == {"tokens": 400, "per_day": round(400 / 3.5)}
     assert [d["tokens"] for d in v["days"][:4]] == [300, 0, 0, 300]
+    assert len(v["hourly"]) == 168 and v["hourly"][2] == 300 and v["hourly"][72] == 300 and sum(v["hourly"]) == 600
     assert v["days"][3]["current"] and v["days"][4]["future"]
     assert v["days"][3]["end_pct"] == 60.0 and v["days"][0]["end_pct"] is None
     assert v["past"][0]["tokens"] == 999 and v["past"][0]["final_pct"] is None

@@ -58,7 +58,9 @@ this month or this year** — periods counted in your own time zone, never UTC:
   work happened in, each tile in the colour of the harness that did most of it.
 - **Quota** — the Claude Max week: how much of the weekly quota is used against
   how much of the week has gone (ahead or behind pace), where this rate lands at
-  the reset, the week's budget in tokens, what is left per day to land at 100%,
+  the reset (point at any hour of the week line for the figure then, the even
+  pace, and the tokens so far; a thin line estimates the hours between readings
+  from tokens), the week's budget in tokens, what is left per day to land at 100%,
   tokens per day of the window, a weekday × hour map of when you use it, past
   weeks, and the week's models, folders and machines. See [The Claude Max quota](#the-claude-max-quota).
 - **Machines** — one meter per machine: its reading, its share, the shape of its
@@ -297,7 +299,7 @@ paths.
 | `GET` | `/api/machines` | Each machine: label policy, last report, collector version, turns and tokens |
 | `GET` | `/api/config` | What the UI needs about this deployment: the rate card's address and the period time zone |
 | `GET` | `/api/overview` | Everything one screen needs for a period (`?period=weekly\|monthly\|yearly`, `?ref=`, `?machine=`, `?source=`): totals with the token split, the same-length period before, by machine, harness, model, project (with its top branches) and origin, and a bucketed series with the empty buckets kept |
-| `GET` | `/api/quota` | The Claude Max week: window, used % against elapsed %, pace and projection, tokens, the estimated budget and what is left, per-day bars, past weeks, weekday × hour, top models, folders and machines |
+| `GET` | `/api/quota` | The Claude Max week: window, used % against elapsed %, pace and projection, tokens, the estimated budget and what is left, per-day bars, tokens per hour of the window, past weeks, weekday × hour, top models, folders and machines |
 | `GET` | `/api/summary` | Per-tool cost summary with subscription comparison (`?machine=` filters) |
 | `GET` | `/api/projects/mine` | The project labels stored for the calling machine (collector key) |
 | `POST` | `/api/projects/rename` | Move the calling machine's rows from a stored label to its repository (`{"renames": {old: new}}`) |

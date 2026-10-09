@@ -240,6 +240,8 @@ export interface Quota {
   five_hour: { used_pct: number; reset: string; at: string } | null;
   history: { at: string; pct: number }[];
   days: QuotaDay[];
+  /** Claude Code tokens per hour of the window, from its start (168) */
+  hourly: number[];
   past: QuotaPast[];
   avg_final_pct: number | null;
   /** tokens by local weekday (0 = Monday) × hour, the last 28 days */

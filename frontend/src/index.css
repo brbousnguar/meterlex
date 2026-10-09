@@ -668,3 +668,23 @@ a.linkout::after { content: "↗"; margin-left: auto; color: var(--accent-ink); 
 .ql-read { fill: var(--surface); stroke: var(--h-claude); stroke-width: 2; }
 .quota-cols { display: grid; gap: 0 22px; }
 @media (min-width: 1000px) { .quota-cols { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; } }
+/* The week line reads like the bar charts: the whole plot is the hit target. */
+.weekline { position: relative; }
+.weekline-plot { touch-action: pan-y; cursor: default; }
+.weekline-plot:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 4px; }
+.ql-est { fill: none; stroke: var(--ink-3); stroke-width: 1.25; }
+.ql-hour { fill: var(--surface-2); }
+.ql-pick line { stroke: var(--ink); stroke-width: 1; }
+.ql-pick-pace { fill: var(--surface); stroke: var(--ink-3); stroke-width: 1.5; }
+.ql-pick-used { fill: var(--h-claude); stroke: var(--ink); stroke-width: 1.5; }
+.ro-pace { display: inline-block; margin-top: 6px; padding: 2px 7px; font-weight: 650; border: 1px solid var(--rule); }
+.ro-pace.over  { background: var(--over-soft);  border-color: transparent; color: var(--over-deep); }
+.ro-pace.under { background: var(--under-soft); border-color: transparent; color: var(--under-deep); }
+.weekline-key { list-style: none; display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 10px; font-size: .78rem; color: var(--ink-2); }
+.weekline-key li { display: flex; align-items: center; gap: 7px; }
+.weekline-key i { display: block; width: 18px; height: 0; border-top: 2.5px solid var(--h-claude); }
+.weekline-key i.k-est  { border-top: 1.25px solid var(--ink-3); }
+.weekline-key i.k-pace { border-top: 1.5px dashed var(--ink-3); }
+.weekline-key i.k-proj { border-top: 1.5px dotted var(--h-claude); }
+/* On a phone the readout is a panel above the plot: one height for every hour, so the plot never moves under a finger. */
+@media (max-width: 719px) { .weekline .readout { min-height: 222px; } }
