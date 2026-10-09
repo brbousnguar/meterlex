@@ -35,6 +35,23 @@ PROVIDER_BY_SOURCE = {
 _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 
 
+_CLAUDE_DATE = re.compile(r"-\d{8}$")
+_DOT_VERSION = re.compile(r"(?<=\d)\.(?=\d)")
+
+
+def canonical_model(model_id: str) -> str:
+    """One model, one name. Claude Code says `claude-sonnet-5-5` and
+    `claude-haiku-4-5-20251001`, Copilot says `claude-sonnet-5.5` and
+    `claude-haiku-4.5`: Claude ids take Anthropic's own dashed, undated form.
+    Other vendors keep their spelling (`glm-5.2`, `gpt-6-luna`)."""
+    m = model_id.strip()
+    if m.lower().startswith("anthropic/"):
+        m = m.split("/", 1)[1]
+    if not m.lower().startswith("claude-"):
+        return model_id
+    return _CLAUDE_DATE.sub("", _DOT_VERSION.sub("-", m.lower()))
+
+
 def classify_source(source: str, model_id: str) -> str:
     """Claude Code runs non-Claude models through Ollama (`ollama launch
     claude`): those count toward Ollama, not the Claude subscription.
@@ -84,7 +101,7 @@ def _normalize(raw: dict, machine: Machine) -> dict:
     source = str(raw["source"])
     if source not in SOURCES:
         raise ValueError(f"unknown source {source!r}")
-    model = str(raw.get("model_id") or "unknown")[:200]
+    model = canonical_model(str(raw.get("model_id") or "unknown"))[:200]
     t = {
         "source": classify_source(source, model),
         "session_id": str(raw["session_id"])[:200],

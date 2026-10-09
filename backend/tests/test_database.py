@@ -31,3 +31,18 @@ def test_an_existing_database_gains_the_branch_column():
     database.create_db(old)  # Claude Code's HEAD outside a repository is no branch
     with old.connect() as conn:
         assert dict(conn.execute(text("SELECT id, branch FROM usage_turns")).all()) == {1: None, 2: "main"}
+
+
+def test_stored_model_spellings_merge_into_one_name(engine):
+    from datetime import datetime
+    from sqlmodel import Session
+    from models import UsageTurn
+    with Session(engine) as session:
+        for i, (src, model) in enumerate([("copilot", "claude-haiku-4.5"), ("claude-code", "claude-haiku-4-5-20251001"),
+                                          ("ollama", "glm-5.2")]):
+            session.add(UsageTurn(source=src, session_id=str(i), turn_key="1", model_id=model, ts=datetime(2026, 10, 1)))
+        session.commit()
+    database.create_db(engine)
+    with engine.connect() as conn:
+        ids = sorted(r[0] for r in conn.execute(text("SELECT model_id FROM usage_turns")))
+    assert ids == ["claude-haiku-4-5", "claude-haiku-4-5", "glm-5.2"]

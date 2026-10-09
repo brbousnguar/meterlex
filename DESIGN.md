@@ -104,7 +104,7 @@ their bars are `--bar`. With eight harness hues as the only hues, colour is sign
 
 One exception, on the Now screen's reading over time: split **by model** (the
 Harness / Model switch above it), the bars stack in the token-split ink below, never
-in a hue. The five shades belong to the top five models of the last 90 days
+in a hue. The five shades belong to the top five models of the last 30 days
 (`model_order` on `/api/overview`), deepest for the biggest, so a model keeps its
 shade when the period changes; every other model is "Other models" in `--bar` and
 always closes the stack. Legend and readout name every part, so no shade has to be

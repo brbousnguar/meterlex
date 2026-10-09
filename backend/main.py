@@ -26,6 +26,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelna
 log = logging.getLogger("meterlex")
 
 MODEL_SHADES = 5                      # the model split's ink ramp (DESIGN.md → Charts)
+MODEL_SHADE_DAYS = 30
 MODEL_PLACEHOLDERS = ("<synthetic>", "synthetic", "unknown", "(unknown)")
 TOOLS = ["claude-code", "codex", "antigravity", "gemini-cli", "ollama", "copilot", "openclaw", "hermes"]
 
@@ -702,9 +703,10 @@ def overview(
     series = [series[b] for b in sorted(series)]
     busiest = max(series, key=lambda b: b["tokens"], default=None)
 
-    # Who owns the model split's shades: the top models of the last 90 days,
-    # not of this period, so a model keeps its shade when the period changes.
-    since = datetime.utcnow() - timedelta(days=90)
+    # Who owns the model split's shades: the top models of the last 30 days,
+    # not of this period, so a model keeps its shade when the period changes,
+    # while a new model earns one within weeks.
+    since = datetime.utcnow() - timedelta(days=MODEL_SHADE_DAYS)
     model_order = [m for m, _ in session.exec(
         select(UsageTurn.model_id, func.sum(UsageTurn.total_tokens).label("t"))
         .where(UsageTurn.ts >= since, UsageTurn.model_id.not_in(MODEL_PLACEHOLDERS))
