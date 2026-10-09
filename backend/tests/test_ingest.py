@@ -129,3 +129,23 @@ def test_legacy_rows_of_one_reply_fold_and_other_replies_stay(session):
     ingest.dedupe_legacy(session, apply=True)
     rows = sorted(_rows(session), key=lambda r: r.ts)
     assert [r.output_tokens for r in rows] == [30, 12]
+
+
+@pytest.mark.parametrize("raw, canonical", [
+    ("claude-sonnet-5-5", "claude-sonnet-5-5"),
+    ("claude-sonnet-5.5", "claude-sonnet-5-5"),             # Copilot's spelling
+    ("claude-haiku-4.5", "claude-haiku-4-5"),
+    ("claude-haiku-4-5-20251001", "claude-haiku-4-5"),      # dated
+    ("anthropic/claude-opus-5.5", "claude-opus-5-5"),
+    ("glm-5.2", "glm-5.2"),                                  # other vendors keep theirs
+    ("ollama/qwen3.6:35b-mlx", "ollama/qwen3.6:35b-mlx"),
+    ("<synthetic>", "<synthetic>"),
+])
+def test_one_model_has_one_name(raw, canonical):
+    assert ingest.canonical_model(raw) == canonical
+
+
+def test_a_turn_is_stored_under_its_canonical_model(session):
+    machine = _machine(session)
+    ingest.ingest_turns(session, machine, [_turn(source="copilot", model_id="claude-sonnet-5.5")])
+    assert [r.model_id for r in _rows(session)] == ["claude-sonnet-5-5"]

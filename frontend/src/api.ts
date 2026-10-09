@@ -185,7 +185,7 @@ export interface Overview {
   by_project: ProjectRowX[];
   by_origin: OriginRow[];
   series: Bucket[];
-  /** The top models of the last 90 days, biggest first: who owns the model split's shades. */
+  /** The top models of the last 30 days, biggest first: who owns the model split's shades. */
   model_order: string[];
   busiest: Bucket | null;
 }

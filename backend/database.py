@@ -51,6 +51,12 @@ def _migrate_columns(target):
             conn.exec_driver_sql("ALTER TABLE usage_turns ADD COLUMN branch VARCHAR")
         # Claude Code records HEAD outside a repository; collectors 0.2.0 sent it
         conn.exec_driver_sql("UPDATE usage_turns SET branch = NULL WHERE branch = 'HEAD'")
+        # Rows ingested before ids were canonicalised: one model, one name.
+        # Costs stay as they were computed; only the name moves.
+        from ingest import canonical_model
+        for (raw,) in conn.exec_driver_sql("SELECT DISTINCT model_id FROM usage_turns").all():
+            if raw and canonical_model(raw) != raw:
+                conn.exec_driver_sql("UPDATE usage_turns SET model_id = ? WHERE model_id = ?", (canonical_model(raw), raw))
         conn.commit()
 
 

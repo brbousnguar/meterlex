@@ -1,0 +1,2 @@
+### Fixed
+- One model, one name: Claude model ids are stored in Anthropic's dashed, undated form, so Copilot's `claude-sonnet-5.5` and Claude Code's `claude-sonnet-5-5` (or `claude-haiku-4-5-20251001` and `claude-haiku-4.5`) count as one model. Stored rows are renamed once on start; their costs are left as they were. The model split's shades now go to the top five of the last 30 days, so a new model earns one sooner (#44)
