@@ -11,8 +11,31 @@ const leader = (b: Bucket) => {
   return top ? harness(top[0]).fill : PLAIN;
 };
 
-export function DayBars({ series, unit }: { series: Bucket[]; unit: Unit }) {
+export type Split = "harness" | "model";
+
+/* Models carry no hue — colour means harness. The model split borrows the ink ramp instead:
+   one shade per model of the long-run top five, deepest for the biggest, so a model keeps its
+   shade across periods; everything else is Other, in the plain bar grey. */
+const SHADES = ["var(--ramp-5)", "var(--ramp-4)", "var(--ramp-3)", "var(--ramp-2)", "var(--ramp-1)"];
+export const OTHER = "other";
+
+function modelParts(split: Record<string, number>, order: string[]) {
+  const parts: { key: string; label: string; fill: string; value: number }[] = [];
+  let other = 0;
+  for (const [m, v] of Object.entries(split)) {
+    const i = order.indexOf(m);
+    if (i >= 0 && i < SHADES.length) parts.push({ key: m, label: m, fill: SHADES[i], value: v });
+    else other += v;
+  }
+  if (other > 0) parts.push({ key: OTHER, label: "Other models", fill: PLAIN, value: other });
+  return parts;
+}
+
+export function DayBars({ series, unit, split = "harness", modelOrder = [] }: {
+  series: Bucket[]; unit: Unit; split?: Split; modelOrder?: string[];
+}) {
   const money = unit === "money";
+  const byModel = split === "model";
   const points: BarPoint[] = series.map((b) => ({
     fill: leader(b),
     key: b.bucket,
@@ -22,12 +45,15 @@ export function DayBars({ series, unit }: { series: Bucket[]; unit: Unit }) {
     tokens: b.tokens,
     cost_eur: b.cost_eur,
     turns: b.turns,
-    parts: Object.entries(money ? b.cost_by_source : b.by_source).map(([src, v]) => ({
-      key: src, label: harness(src).label, fill: harness(src).fill, value: v,
-    })),
-    models: Object.entries((money ? b.cost_by_model : b.by_model) ?? {}).map(([m, v]) => ({ key: m, label: m, value: v })),
+    parts: byModel
+      ? modelParts((money ? b.cost_by_model : b.by_model) ?? {}, modelOrder)
+      : Object.entries(money ? b.cost_by_source : b.by_source).map(([src, v]) => ({
+          key: src, label: harness(src).label, fill: harness(src).fill, value: v,
+        })),
+    // Split by model, the parts already are the models; the top-three list would repeat them.
+    models: byModel ? undefined : Object.entries((money ? b.cost_by_model : b.by_model) ?? {}).map(([m, v]) => ({ key: m, label: m, value: v })),
   }));
-  return <Bars points={points} unit={unit} />;
+  return <Bars points={points} unit={unit} what={byModel ? "models" : "harnesses"} />;
 }
 
 /** One machine's reading per bucket. This replaced a sparkline: a shape with no numbers cannot

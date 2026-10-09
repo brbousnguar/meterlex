@@ -1,9 +1,14 @@
 import type { Overview } from "../api";
 import Odometer from "../components/Odometer";
-import { DayBars, RankRows, SplitBar } from "../components/charts";
+import { useState } from "react";
+import { DayBars, RankRows, SplitBar, type Split } from "../components/charts";
 import Treemap, { type Tile } from "../components/Treemap";
 import { ago, bucketFull, byMeasure, change, fmtEur, fmtInt, fmtMeasure, fmtTok, folderLabel, harness, measure, moneyDrums, pct, PLAIN, type Unit } from "../lib";
+import Seg from "../components/Seg";
+import { recall, remember } from "../lib";
 import type { Tab } from "../App";
+
+const SPLITS: { id: Split; short: string }[] = [{ id: "harness", short: "Harness" }, { id: "model", short: "Model" }];
 
 export default function Now({ data, unit, go }: { data: Overview; unit: Unit; go: (t: Tab) => void }) {
   const t = data.totals;
@@ -14,6 +19,8 @@ export default function Now({ data, unit, go }: { data: Overview; unit: Unit; go
     : change(t.tokens, data.previous?.tokens);
   const paidRatio = t.sub_eur > 0 ? t.cost_eur / t.sub_eur : null;
   const cacheShare = pct(t.cache_read, t.tokens);
+  const [split, setSplit] = useState<Split>(() => (recall("mx.split") as Split) || "harness");
+  const pickSplit = (s: Split) => { setSplit(s); remember("mx.split", s); };
 
   return (
     <>
@@ -100,7 +107,10 @@ export default function Now({ data, unit, go }: { data: Overview; unit: Unit; go
             </div>
           )}
         </div>
-        <DayBars series={data.series} unit={unit} />
+        <div className="split-pick">
+          <Seg label="Split the bars by" value={split} options={SPLITS} onPick={pickSplit} />
+        </div>
+        <DayBars series={data.series} unit={unit} split={split} modelOrder={data.model_order} />
       </section>
 
       <section className="section">

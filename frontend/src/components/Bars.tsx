@@ -38,7 +38,7 @@ function niceMax(v: number) {
  * beside the selected column on a desktop, as a panel above the plot on a phone — never over the
  * bar it describes. ← → Home End move between buckets, ↑ ↓ between parts, Esc clears.
  */
-export default function Bars({ points, unit, height = 230, axis = true, compact = false, legend = true }: {
+export default function Bars({ points, unit, height = 230, axis = true, compact = false, legend = true, what = "harnesses" }: {
   points: BarPoint[];
   unit: Unit;
   height?: number;
@@ -46,6 +46,8 @@ export default function Bars({ points, unit, height = 230, axis = true, compact 
   /** A small multiple: the readout sits above the plot instead of floating over 94px of bars. */
   compact?: boolean;
   legend?: boolean;
+  /** What the stacked parts are, for the keyboard hint. */
+  what?: string;
 }) {
   const money = unit === "money";
   const top = niceMax(Math.max(...points.map((p) => p.value), 0));
@@ -81,7 +83,8 @@ export default function Bars({ points, unit, height = 230, axis = true, compact 
       else order.push({ key: part.key, label: part.label, fill: part.fill, total: part.value });
     }
   }
-  order.sort((a, c) => c.total - a.total);
+  // Biggest first; "other" is a remainder, not a contender, so it always closes the stack.
+  order.sort((a, c) => Number(a.key === "other") - Number(c.key === "other") || c.total - a.total);
   const stacked = order.length > 0;
 
   useLayoutEffect(() => {
@@ -200,7 +203,7 @@ export default function Bars({ points, unit, height = 230, axis = true, compact 
       <div className="bars-body" style={{ marginLeft: axis ? undefined : 0 }}>
         <div className="bars-plot" ref={plotRef} style={{ height }} role="group" tabIndex={0}
              data-focusing={focus ? "true" : "false"}
-             aria-label="Chart. Left and right arrows move between bars, up and down between harnesses."
+             aria-label={`Chart. Left and right arrows move between bars, up and down between ${what}.`}
              onPointerMove={pickAt} onPointerDown={pickAt} onPointerLeave={leave}
              onFocus={() => setReading(true)} onBlur={() => leave()} onKeyDown={onKey}>
           {axis && (
@@ -237,7 +240,7 @@ export default function Bars({ points, unit, height = 230, axis = true, compact 
       </div>
 
       {stacked && legend && (
-        <ul className="bars-legend">
+        <ul className="bars-legend" data-what={what}>
           {order.map((o) => (
             <li key={o.key}>
               <button type="button" aria-pressed={pinned === o.key} data-on={focus === o.key ? "true" : "false"}

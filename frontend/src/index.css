@@ -487,7 +487,9 @@ a.linkout::after { content: "↗"; margin-left: auto; color: var(--accent-ink); 
 .bars-legend button[aria-pressed="true"] { border-color: var(--ink); }
 .lg-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 .lg-val { font-family: var(--disp); font-weight: 650; font-variant-numeric: tabular-nums; color: var(--ink-2); }
-@media (min-width: 720px) { .bars-legend { grid-template-columns: repeat(4, minmax(0, 200px)); } }
+/* Model ids are long; on a phone two to a row would cut every name. */
+.bars-legend[data-what="models"] { grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 720px) { .bars-legend, .bars-legend[data-what="models"] { grid-template-columns: repeat(4, minmax(0, 200px)); } }
 .ro-when { font-family: var(--disp); font-variation-settings: "SOFT" 50; font-weight: 650; font-size: .9rem; }
 .ro-value {
   font-family: var(--disp); font-variation-settings: "SOFT" 50;
@@ -688,3 +690,6 @@ a.linkout::after { content: "↗"; margin-left: auto; color: var(--accent-ink); 
 .weekline-key i.k-proj { border-top: 1.5px dotted var(--h-claude); }
 /* On a phone the readout is a panel above the plot: one height for every hour, so the plot never moves under a finger. */
 @media (max-width: 719px) { .weekline .readout { min-height: 222px; } }
+
+/* The Harness / Model switch of the reading over time sits right above the plot it splits. */
+.split-pick { display: flex; justify-content: flex-end; margin: -4px 0 10px; }
