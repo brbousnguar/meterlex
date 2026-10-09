@@ -158,3 +158,17 @@ def test_previous_bounds_walk_back_a_month_and_a_year():
     start, _ = main._period_bounds("yearly", "2026")
     prev_start, _ = main._previous_bounds("yearly", start)
     assert main._from_utc(prev_start).year == 2025
+
+
+def test_model_order_is_the_top_models_of_the_last_90_days(client, engine):
+    from datetime import timedelta
+    now = datetime.utcnow()
+    with Session(engine) as session:
+        for i, (model, tok) in enumerate([("claude-opus-5-5", 900), ("gpt-5.6", 500), ("<synthetic>", 9999),
+                                          ("claude-sonnet-5-5", 300), ("old-model", 99999)]):
+            ts = now - timedelta(days=200 if model == "old-model" else 1)
+            session.add(UsageTurn(source="claude-code", session_id=f"s{i}", turn_key="k", model_id=model, ts=ts,
+                                  total_tokens=tok, input_tokens=tok))
+        session.commit()
+    body = client.get("/api/overview", params={"period": "monthly"}).json()
+    assert body["model_order"] == ["claude-opus-5-5", "gpt-5.6", "claude-sonnet-5-5"]

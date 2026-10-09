@@ -188,3 +188,8 @@ export function ago(iso8601: string | null): { text: string; state: "live" | "qu
   if (hours < 24) return { text: `${hours} h ago`, state };
   return { text: `${Math.round(hours / 24)} d ago`, state };
 }
+
+/* localStorage is a convenience here: a private window or blocked site data
+   must not stop the app rendering, so every access is guarded. */
+export const remember = (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* ignore */ } };
+export const recall = (k: string) => { try { return localStorage.getItem(k); } catch { return null; } };

@@ -25,6 +25,8 @@ import quota as quota_view
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s %(message)s")
 log = logging.getLogger("meterlex")
 
+MODEL_SHADES = 5                      # the model split's ink ramp (DESIGN.md → Charts)
+MODEL_PLACEHOLDERS = ("<synthetic>", "synthetic", "unknown", "(unknown)")
 TOOLS = ["claude-code", "codex", "antigravity", "gemini-cli", "ollama", "copilot", "openclaw", "hermes"]
 
 # Periods are named in the user's own time, not UTC: a "week" that starts at
@@ -700,6 +702,15 @@ def overview(
     series = [series[b] for b in sorted(series)]
     busiest = max(series, key=lambda b: b["tokens"], default=None)
 
+    # Who owns the model split's shades: the top models of the last 90 days,
+    # not of this period, so a model keeps its shade when the period changes.
+    since = datetime.utcnow() - timedelta(days=90)
+    model_order = [m for m, _ in session.exec(
+        select(UsageTurn.model_id, func.sum(UsageTurn.total_tokens).label("t"))
+        .where(UsageTurn.ts >= since, UsageTurn.model_id.not_in(MODEL_PLACEHOLDERS))
+        .group_by(UsageTurn.model_id).order_by(func.sum(UsageTurn.total_tokens).desc()).limit(MODEL_SHADES)
+    ).all()]
+
     return {
         "period": period, "ref": ref, "machine": machine, "source": source,
         "tz": str(LOCAL_TZ),
@@ -713,6 +724,7 @@ def overview(
         "by_project": by_project,
         "by_origin": by_origin,
         "series": series,
+        "model_order": model_order,
         "busiest": busiest if busiest and busiest["tokens"] else None,
     }
 

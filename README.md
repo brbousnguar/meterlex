@@ -54,7 +54,8 @@ this month or this year** — periods counted in your own time zone, never UTC:
   latest reading from each machine, list price against what the subscriptions
   actually cost over that period, how much the subscriptions earn, the share
   replayed from cache, the reading per day (per hour, on the Day period) — point
-  at any bar for its harness split and its models — and a map of the folders the
+  at any bar for its harness split and its models; a Harness / Model switch
+  stacks the bars by model instead — and a map of the folders the
   work happened in, each tile in the colour of the harness that did most of it.
 - **Quota** — the Claude Max week: how much of the weekly quota is used against
   how much of the week has gone (ahead or behind pace), where this rate lands at

@@ -102,6 +102,14 @@ the reading grew, `#2F5A3B` on `#DCEBDF` (6.42:1) when it fell.
 **Machines, models and folders carry no colour.** They are ranked by the number, and
 their bars are `--bar`. With eight harness hues as the only hues, colour is signal.
 
+One exception, on the Now screen's reading over time: split **by model** (the
+Harness / Model switch above it), the bars stack in the token-split ink below, never
+in a hue. The five shades belong to the top five models of the last 90 days
+(`model_order` on `/api/overview`), deepest for the biggest, so a model keeps its
+shade when the period changes; every other model is "Other models" in `--bar` and
+always closes the stack. Legend and readout name every part, so no shade has to be
+told apart from its neighbour.
+
 ### The token split is ink
 
 `--ramp-1` … `--ramp-5`: `#AAB4CC #8894B3 #69769B #475580 #1F2A44`, an ink wash from
