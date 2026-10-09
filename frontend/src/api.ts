@@ -215,7 +215,42 @@ export interface Health {
   by_source: Record<string, number>;
 }
 
+export interface QuotaDay {
+  start: string; start_local: string; tokens: number;
+  future: boolean; current: boolean; end_pct: number | null; pace_pct: number;
+}
+export interface QuotaPast {
+  start: string; reset: string; start_local: string;
+  tokens: number; final_pct: number | null; budget: number | null;
+}
+export interface Quota {
+  now: string;
+  tz: string;
+  /** false until a first reading: the window is then just the last seven days */
+  anchored: boolean;
+  window: { start: string; reset: string; start_local: string; reset_local: string; elapsed_pct: number; days_left: number | null };
+  reading: { used_pct: number; at: string; machine: string } | null;
+  used_pct: number | null;
+  pace: { delta_pts: number; status: "ahead" | "behind" | "on"; projected_pct: number | null } | null;
+  tokens: {
+    used: number; per_day_so_far: number; avg_day_past: number | null;
+    budget: number | null; budget_from: string | null;
+    left: { tokens: number; per_day: number | null } | null;
+  };
+  five_hour: { used_pct: number; reset: string; at: string } | null;
+  history: { at: string; pct: number }[];
+  days: QuotaDay[];
+  past: QuotaPast[];
+  avg_final_pct: number | null;
+  /** tokens by local weekday (0 = Monday) × hour, the last 28 days */
+  hours: number[][];
+  by_project: { key: string; tokens: number }[];
+  by_machine: { key: string; tokens: number }[];
+  by_model: { key: string; tokens: number }[];
+}
+
 export const api = {
+  quota: () => get<Quota>("/api/quota"),
   health: () => get<Health>("/api/health"),
   overview: (period: Period, ref?: string | null, machine?: string | null) =>
     get<Overview>(`/api/overview?period=${period}${ref ? `&ref=${encodeURIComponent(ref)}` : ""}` +

@@ -20,6 +20,7 @@ from models import UsageTurn, ModelPrice, Setting, ManualBill, Machine
 import pricing
 import ingest
 import machines
+import quota as quota_view
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s %(message)s")
 log = logging.getLogger("meterlex")
@@ -188,11 +189,18 @@ def api_ingest(payload: dict, authorization: Optional[str] = Header(None),
     if machine is None:
         raise HTTPException(401, "unknown or revoked machine key")
     turns = payload.get("turns")
+    quota = payload.get("quota")
     if not isinstance(turns, list):
         raise HTTPException(400, "turns must be a list")
+    if quota is not None and not isinstance(quota, list):
+        raise HTTPException(400, "quota must be a list")
     if len(turns) > ingest.MAX_TURNS_PER_BATCH:
         raise HTTPException(413, f"at most {ingest.MAX_TURNS_PER_BATCH} turns per batch")
+    if quota and len(quota) > ingest.MAX_QUOTA_PER_BATCH:
+        raise HTTPException(413, f"at most {ingest.MAX_QUOTA_PER_BATCH} quota readings per batch")
     result = ingest.ingest_turns(session, machine, turns, collector=payload.get("collector"))
+    if quota:
+        result["quota"] = ingest.ingest_quota(session, machine, quota)
     return {"machine": machine.name, **result}
 
 
@@ -710,6 +718,12 @@ def overview(
 
 
 # ── prices ────────────────────────────────────────────────────────────────────
+
+@app.get("/api/quota")
+def api_quota(session: Session = Depends(get_session)):
+    """The Claude Max weekly window: used against elapsed, and in tokens."""
+    return quota_view.view(session, datetime.utcnow(), LOCAL_TZ)
+
 
 @app.get("/api/prices")
 def list_prices(session: Session = Depends(get_session)):

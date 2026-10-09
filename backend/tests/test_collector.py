@@ -427,3 +427,68 @@ def test_unsent_turns_wait_in_the_spool(tmp_path, monkeypatch):
     monkeypatch.setattr(mc, "post", lambda cfg, batch: sent.extend(batch) or {})
     assert mc.cmd_run(cfg) == 0  # nothing new; the spooled turn goes
     assert len(sent) == 1 and (home / "spool.jsonl").read_text() == ""
+
+
+# ── the Claude Max quota, from Claude Code's status line (#35) ────────────────
+
+STATUS = {
+    "model": {"display_name": "Opus 5.5"}, "workspace": {"current_dir": "/Users/me/Server"},
+    "rate_limits": {"five_hour": {"used_percentage": 23.5, "resets_at": 1_000_000 + 7200},
+                    "seven_day": {"used_percentage": 60, "resets_at": 1_000_000 + 3 * 86400},
+                    "spend_limit": {"used_percentage": 5, "resets_at": 1}},
+}
+
+
+def test_statusline_records_new_readings_once_and_prints_the_pace(tmp_path, monkeypatch, capsys):
+    import io
+    monkeypatch.setenv("METERLEX_HOME", str(tmp_path))
+    monkeypatch.setattr(mc.time, "time", lambda: 1_000_000)
+    assert mc.cmd_statusline(io.StringIO(json.dumps(STATUS))) == 0
+    # 4 of 7 days gone → 57%; 60% used is 3 points ahead
+    assert capsys.readouterr().out.strip() == "Opus 5.5 · Server · week 60% · 3 pts ahead · 5h 24%"
+    mc.cmd_statusline(io.StringIO(json.dumps(STATUS)))             # same reading again: not kept
+    lines = (tmp_path / "quota.jsonl").read_text().splitlines()
+    assert sorted(json.loads(l)["window"] for l in lines) == ["five_hour", "seven_day"]
+
+
+def test_statusline_never_fails_on_bad_input(tmp_path, monkeypatch, capsys):
+    import io
+    monkeypatch.setenv("METERLEX_HOME", str(tmp_path))
+    assert mc.cmd_statusline(io.StringIO("not json")) == 0
+    assert mc.cmd_statusline(io.StringIO('{"rate_limits": {"seven_day": {"used_percentage": null}}}')) == 0
+    assert not (tmp_path / "quota.jsonl").exists()
+
+
+def test_run_sends_quota_readings_once(tmp_path, monkeypatch):
+    monkeypatch.setenv("METERLEX_HOME", str(tmp_path))
+    mc.record_quota(mc.quota_readings(STATUS, 1_000_000))
+    sent = []
+    monkeypatch.setattr(mc, "_hub", lambda cfg, path, body=None: sent.append(body) or {})
+    cfg, state = {"machine": "mini", "hub": "http://h", "key": "k"}, {}
+    assert mc.quota_flush(cfg, state) == (2, None)
+    assert mc.quota_flush(cfg, state) == (0, None)
+    assert [r["window"] for r in sent[0]["quota"]] == ["five_hour", "seven_day"] and sent[0]["turns"] == []
+
+    def down(*a, **k):
+        raise urllib.error.URLError("down")
+    monkeypatch.setattr(mc, "_hub", down)
+    mc.record_quota([{"window": "seven_day", "used_pct": 61.0, "resets_at": 1_000_000 + 3 * 86400, "ts": "x"}])
+    before = state["quota_offset"]
+    assert mc.quota_flush(cfg, state)[1].startswith("hub unreachable")
+    assert state["quota_offset"] == before                        # kept for the next run
+
+
+def test_an_idle_session_s_stale_lower_figure_is_not_news(tmp_path, monkeypatch, capsys):
+    import io
+    monkeypatch.setenv("METERLEX_HOME", str(tmp_path))
+    monkeypatch.setattr(mc.time, "time", lambda: 1_000_000)
+    mc.cmd_statusline(io.StringIO(json.dumps(STATUS)))
+    stale = json.loads(json.dumps(STATUS))
+    stale["rate_limits"]["seven_day"]["used_percentage"] = 24
+    mc.cmd_statusline(io.StringIO(json.dumps(stale)))
+    assert "week 60%" in capsys.readouterr().out.splitlines()[-1]     # the newest known figure
+    weeks = [json.loads(l) for l in (tmp_path / "quota.jsonl").read_text().splitlines()]
+    assert [r["used_pct"] for r in weeks if r["window"] == "seven_day"] == [60.0]
+    nxt = json.loads(json.dumps(STATUS))
+    nxt["rate_limits"]["seven_day"].update(used_percentage=1, resets_at=STATUS["rate_limits"]["seven_day"]["resets_at"] + 7 * 86400)
+    assert mc.record_quota(mc.quota_readings(nxt, 1_000_000)) == 1     # a new window is news

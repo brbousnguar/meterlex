@@ -15,7 +15,7 @@ from typing import Optional
 from sqlmodel import Session, select
 
 from database import engine, create_db
-from models import Machine, UsageTurn
+from models import Machine, QuotaReading, UsageTurn
 import pricing
 
 log = logging.getLogger("meterlex.ingest")
@@ -327,3 +327,36 @@ def recompute_costs() -> int:
                 session.commit()
         session.commit()
         return n
+
+
+_WINDOW = re.compile(r"^[a-z0-9_]{1,40}$")
+MAX_QUOTA_PER_BATCH = 5000
+
+
+def ingest_quota(session: Session, machine: Machine, readings: list) -> dict:
+    """Store rate-limit readings; one seen before (same window, time, machine) is skipped."""
+    counts = {"inserted": 0, "unchanged": 0, "rejected": 0}
+    for raw in readings:
+        try:
+            window = str(raw["window"])
+            if not _WINDOW.match(window):
+                raise ValueError(window)
+            used = float(raw["used_pct"])
+            if not 0 <= used <= 1000:
+                raise ValueError(used)
+            resets = datetime.fromtimestamp(float(raw["resets_at"]), tz=timezone.utc).replace(tzinfo=None)
+            ts = _ts(raw["ts"])
+        except (KeyError, TypeError, ValueError, OverflowError, OSError):
+            counts["rejected"] += 1
+            continue
+        seen = session.exec(select(QuotaReading).where(
+            QuotaReading.window == window, QuotaReading.ts == ts, QuotaReading.machine == machine.name,
+        )).first()
+        if seen is not None:
+            counts["unchanged"] += 1
+            continue
+        session.add(QuotaReading(window=window, used_pct=used, resets_at=resets, ts=ts, machine=machine.name))
+        session.flush()
+        counts["inserted"] += 1
+    session.commit()
+    return counts

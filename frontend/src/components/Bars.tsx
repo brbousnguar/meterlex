@@ -15,6 +15,8 @@ export type BarPoint = {
   parts?: { key: string; label: string; fill: string; value: number }[];
   /** Models behind the bucket: named, never coloured. */
   models?: { key: string; label: string; value: number }[];
+  /** Replaces the second line of the readout (the other unit) when that line means nothing here. */
+  note?: string;
   /** A bar with no split takes this colour. */
   fill?: string;
 };
@@ -164,7 +166,7 @@ export default function Bars({ points, unit, height = 230, axis = true, compact 
           <>
             <div className="ro-value">{fmtV(b.value)}</div>
             <div className="ro-line">
-              <b>{money ? fmtTok(b.tokens) : fmtEur(b.cost_eur)}</b>
+              {b.note ?? <b>{money ? fmtTok(b.tokens) : fmtEur(b.cost_eur)}</b>}
               {b.turns != null && <> · <b>{fmtInt(b.turns)}</b> {b.turns === 1 ? "reply" : "replies"}</>}
             </div>
           </>

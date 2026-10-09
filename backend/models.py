@@ -94,6 +94,22 @@ class ScanState(SQLModel, table=True):
     last_model: Optional[str] = None
 
 
+class QuotaReading(SQLModel, table=True):
+    """A subscription rate-limit reading, as Claude Code hands it to the status
+    line: how much of a window is used and when that window resets."""
+    __tablename__ = "quota_readings"
+    __table_args__ = (
+        UniqueConstraint("window", "ts", "machine", name="uq_quota_reading"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    window: str = Field(index=True)     # seven_day | five_hour
+    used_pct: float = 0.0               # 0-100
+    resets_at: datetime                 # naive UTC
+    ts: datetime = Field(index=True)    # when it was read, naive UTC
+    machine: str = Field(default=HUB_MACHINE)
+
+
 class Setting(SQLModel, table=True):
     __tablename__ = "settings"
 

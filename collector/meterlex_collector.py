@@ -12,6 +12,7 @@ into what is sent. `run --dry-run` prints exactly what would go.
     python meterlex_collector.py status
     python meterlex_collector.py rollup [--apply]
     python meterlex_collector.py install      # launchd on macOS, a Scheduled Task on Windows, a systemd timer on Linux
+    python meterlex_collector.py statusline   # Claude Code's status line: records the Claude Max quota
 
 One file, standard library only, Python 3.9+: macOS's own /usr/bin/python3 runs
 it, and so does `uv run meterlex_collector.py …` on Windows.
@@ -37,7 +38,7 @@ from pathlib import Path
 from typing import Iterator, Optional
 from urllib.parse import urlparse
 
-VERSION = "0.4.0"
+VERSION = "0.5.0"
 BATCH = 1000               # turns per POST
 SPOOL_MAX = 500_000        # unsent turns kept on disk before the oldest are dropped
 HOME = Path.home()
@@ -1133,6 +1134,149 @@ def spool_flush(cfg: dict) -> tuple[int, Optional[str]]:
     return sent, error
 
 
+# ── the Claude Max quota ──────────────────────────────────────────────────────
+# Claude Code hands its status line the subscription's rate limits (documented
+# as `rate_limits.<window>.used_percentage` / `.resets_at`). `statusline` keeps
+# each new reading in quota.jsonl; `run` sends what it has not sent yet.
+
+WEEK_S = 7 * 24 * 3600
+QUOTA_KEEP = 256 * 1024     # bytes of sent readings kept before quota.jsonl is trimmed
+
+
+def _quota_path() -> Path:
+    return config_dir() / "quota.jsonl"
+
+
+def quota_readings(data: dict, now: float) -> list:
+    """The windows in one status-line payload, as readings."""
+    out = []
+    limits = data.get("rate_limits") if isinstance(data, dict) else None
+    for window, w in (limits or {}).items():
+        if not isinstance(w, dict) or window == "spend_limit":
+            continue
+        try:
+            used, resets = float(w["used_percentage"]), float(w["resets_at"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        out.append({"window": window, "used_pct": used, "resets_at": int(resets),
+                    "ts": datetime.fromtimestamp(now, tz=timezone.utc).isoformat()})
+    return out
+
+
+def _newer(r: dict, kept) -> bool:
+    """Within one window the percentage only grows. Every open Claude Code
+    session repaints its status line with the last figure it was given, so an
+    idle session from days ago still shows an old, lower one: only a higher
+    figure, or a new window, is news."""
+    if not kept:
+        return True
+    pct, resets = kept
+    if abs(r["resets_at"] - resets) > 3600:
+        return r["resets_at"] > resets
+    return r["used_pct"] > pct
+
+
+def record_quota(readings: list) -> int:
+    """Append the readings that are news for their window (see _newer)."""
+    last_path = config_dir() / "quota-last.json"
+    last = _read_json(last_path, {})
+    fresh = [r for r in readings if _newer(r, last.get(r["window"]))]
+    if not fresh:
+        return 0
+    config_dir().mkdir(parents=True, exist_ok=True)
+    with open(_quota_path(), "a", encoding="utf-8") as fh:
+        for r in fresh:
+            fh.write(json.dumps(r) + "\n")
+    for r in fresh:
+        last[r["window"]] = [r["used_pct"], r["resets_at"]]
+    _write_json(last_path, last)
+    return len(fresh)
+
+
+def status_text(data: dict, readings: list, now: float) -> str:
+    """One short line: model · folder · week used and its pace · the 5-hour window."""
+    parts = []
+    model = (data.get("model") or {}).get("display_name")
+    folder = (data.get("workspace") or {}).get("current_dir") or data.get("cwd")
+    if model:
+        parts.append(str(model))
+    if folder:
+        parts.append(Path(str(folder)).name or str(folder))
+    by = {r["window"]: r for r in readings}
+    week = by.get("seven_day")
+    if week:
+        elapsed = min(1.0, max(0.0, 1 - (week["resets_at"] - now) / WEEK_S)) * 100
+        delta = week["used_pct"] - elapsed
+        pace = ("on pace" if abs(delta) <= 2
+                else f"{abs(delta):.0f} pts {'ahead' if delta > 0 else 'behind'}")
+        parts.append(f"week {week['used_pct']:.0f}% · {pace}")
+    if by.get("five_hour"):
+        parts.append(f"5h {by['five_hour']['used_pct']:.0f}%")
+    return " · ".join(parts)
+
+
+def cmd_statusline(stdin=None) -> int:
+    """Never fails: a status line that errors blanks Claude Code's footer."""
+    now = time.time()
+    try:
+        data = json.loads((stdin or sys.stdin).read() or "{}")
+    except (ValueError, OSError):
+        data = {}
+    readings = quota_readings(data, now)
+    try:
+        record_quota(readings)
+        # an idle session's own figure can be days old: show the newest known
+        best = _read_json(config_dir() / "quota-last.json", {})
+        for r in readings:
+            kept = best.get(r["window"])
+            if kept and abs(kept[1] - r["resets_at"]) <= 3600:
+                r["used_pct"] = max(r["used_pct"], kept[0])
+    except OSError:
+        pass
+    print(status_text(data if isinstance(data, dict) else {}, readings, now))
+    return 0
+
+
+def quota_flush(cfg: dict, state: dict) -> tuple[int, Optional[str]]:
+    """Send the readings past state['quota_offset']; trim the file once it grows."""
+    path = _quota_path()
+    if not path.exists():
+        return 0, None
+    offset = int(state.get("quota_offset", 0))
+    size = path.stat().st_size
+    if offset > size:
+        offset = 0
+    with open(path, "rb") as fh:
+        fh.seek(offset)
+        chunk = fh.read()
+    end = chunk.rfind(b"\n") + 1      # a line still being written waits for the next run
+    readings = []
+    for line in chunk[:end].splitlines():
+        try:
+            readings.append(json.loads(line))
+        except ValueError:
+            continue
+    if readings:
+        body = {"collector": VERSION, "machine": cfg["machine"], "turns": [], "quota": readings}
+        try:
+            _hub(cfg, "/api/ingest", body)
+        except urllib.error.HTTPError as exc:
+            return 0, f"hub answered {exc.code} to the quota readings"
+        except (urllib.error.URLError, OSError, ValueError) as exc:
+            return 0, f"hub unreachable for the quota readings: {exc}"
+    offset += end
+    if offset > QUOTA_KEEP:
+        with open(path, "rb") as fh:
+            fh.seek(offset)
+            rest = fh.read()
+        tmp = path.with_suffix(".tmp")
+        tmp.write_bytes(rest)
+        os.replace(tmp, path)
+        offset = 0
+    state["quota_offset"] = offset
+    return len(readings), None
+
+
 # ── commands ──────────────────────────────────────────────────────────────────
 
 def collect(cfg: dict, state: dict, full: bool, reattribute: bool = False) -> tuple[list, dict]:
@@ -1176,9 +1320,12 @@ def cmd_run(cfg: dict, dry_run: bool = False, full: bool = False, reattribute: b
     state["last_run"] = _now()
     _write_json(state_path, state)
     sent, error = spool_flush(cfg)
+    quota_sent, quota_error = quota_flush(cfg, state)
+    error = error or quota_error
     state["last_sent"], state["last_error"] = sent, error
     _write_json(state_path, state)
-    print(f"sent {sent}" + (f"; kept the rest for the next run ({error})" if error else ""))
+    print(f"sent {sent}" + (f", {quota_sent} quota reading(s)" if quota_sent else "")
+          + (f"; kept the rest for the next run ({error})" if error else ""))
     return 1 if error else 0
 
 
@@ -1223,6 +1370,9 @@ def cmd_status(cfg: dict) -> int:
         else:
             print(f"  {name:<12} {p} {'' if p.exists() else '(absent)'}")
     print(f"  files tracked {len(state.get('files', {}))}, waiting to send {spooled}")
+    last_quota = _read_json(config_dir() / "quota-last.json", {})
+    print(f"  quota    " + (", ".join(f"{w} {v[0]:.0f}%" for w, v in last_quota.items())
+                            or "no reading yet (statusLine → `statusline`)"))
     print(f"  last run {state.get('last_run', 'never')}, sent {state.get('last_sent', 0)}, "
           f"error {state.get('last_error') or 'none'}")
     return 0
@@ -1329,7 +1479,11 @@ def main(argv=None) -> int:
     i = sub.add_parser("install", help="run automatically: launchd on macOS, a Scheduled Task on Windows, "
                                        "a systemd user timer on Linux")
     i.add_argument("--every", type=int, default=300)
+    sub.add_parser("statusline", help="Claude Code's status line: record the Claude Max quota, print one line")
     args = ap.parse_args(argv)
+
+    if args.cmd == "statusline":
+        return cmd_statusline()
 
     if args.cmd == "setup":
         return cmd_setup(args)

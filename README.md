@@ -47,7 +47,7 @@ host; transcripts never leave the machine that wrote them.
 
 ### What the app shows
 
-Four readings and a settings screen, over **today, this week (Monday start),
+Five readings and a settings screen, over **today, this week (Monday start),
 this month or this year** — periods counted in your own time zone, never UTC:
 
 - **Now** — the reading itself: tokens (or euros, to the cent) as an odometer, the
@@ -56,6 +56,11 @@ this month or this year** — periods counted in your own time zone, never UTC:
   replayed from cache, the reading per day (per hour, on the Day period) — point
   at any bar for its harness split and its models — and a map of the folders the
   work happened in, each tile in the colour of the harness that did most of it.
+- **Quota** — the Claude Max week: how much of the weekly quota is used against
+  how much of the week has gone (ahead or behind pace), where this rate lands at
+  the reset, the week's budget in tokens, what is left per day to land at 100%,
+  tokens per day of the window, a weekday × hour map of when you use it, past
+  weeks, and the week's models, folders and machines. See [The Claude Max quota](#the-claude-max-quota).
 - **Machines** — one meter per machine: its reading, its share, the shape of its
   period, when its collector last reported, and which machines went silent.
 - **Harnesses** — per tool: tokens, replies, models, list price against its fee,
@@ -165,6 +170,34 @@ for the default) points one elsewhere, and is the only way to turn on
 (`~/.config/meterlex/`, or `%APPDATA%\meterlex\` on Windows). `manage.py machine-list`
 shows each machine's last report; `machine-revoke` stops a key.
 
+### The Claude Max quota
+
+Anthropic meters the Max plan as a percentage of a weekly window with a reset
+time, never in tokens. Claude Code hands both to its status line
+(`rate_limits.seven_day` and `five_hour`), so the collector doubles as the
+status line and keeps each new reading:
+
+```json
+// ~/.claude/settings.json
+"statusLine": { "type": "command", "command": "/usr/bin/python3 /path/to/meterlex_collector.py statusline" }
+```
+
+It prints one line (`Opus 5.5 · Server · week 41% · 6 pts ahead · 5h 12%`),
+appends readings to `quota.jsonl` in the collector's folder, and `run` sends
+them with the turns. One machine is enough: the quota belongs to the account.
+
+- **Only higher figures are kept.** Every open Claude Code session repaints its
+  status line with the last figure it was given, so an idle session from days
+  ago still shows an old, lower one. Within a window the figure only grows, so
+  the collector keeps a reading only when it is higher (or a new window), and
+  the hub reads the highest.
+- **The week runs from the reset, not Monday.** The Quota screen ignores the
+  period control; its days are 24-hour steps from the reset hour.
+- **The budget in tokens is an estimate:** Claude Code tokens up to a reading ÷
+  that reading's percentage. Opus weighs more than Sonnet, cache reads count
+  for little, and claude.ai or desktop use is in the percentage but not in the
+  tokens. The percentage is the figure to trust.
+
 ## How it is put together
 
 ```text
@@ -260,10 +293,11 @@ paths.
 | Method | Route | Purpose |
 | --- | --- | --- |
 | `GET` | `/api/health` | Status, total turns, last ingest timestamp, turns per tool and per machine |
-| `POST` | `/api/ingest` | A collector's batch (`Authorization: Bearer <machine key>`); returns inserted / updated / folded / rejected |
+| `POST` | `/api/ingest` | A collector's batch (`Authorization: Bearer <machine key>`); returns inserted / updated / folded / rejected. An optional `quota` list carries rate-limit readings |
 | `GET` | `/api/machines` | Each machine: label policy, last report, collector version, turns and tokens |
 | `GET` | `/api/config` | What the UI needs about this deployment: the rate card's address and the period time zone |
 | `GET` | `/api/overview` | Everything one screen needs for a period (`?period=weekly\|monthly\|yearly`, `?ref=`, `?machine=`, `?source=`): totals with the token split, the same-length period before, by machine, harness, model, project (with its top branches) and origin, and a bucketed series with the empty buckets kept |
+| `GET` | `/api/quota` | The Claude Max week: window, used % against elapsed %, pace and projection, tokens, the estimated budget and what is left, per-day bars, past weeks, weekday × hour, top models, folders and machines |
 | `GET` | `/api/summary` | Per-tool cost summary with subscription comparison (`?machine=` filters) |
 | `GET` | `/api/projects/mine` | The project labels stored for the calling machine (collector key) |
 | `POST` | `/api/projects/rename` | Move the calling machine's rows from a stored label to its repository (`{"renames": {old: new}}`) |
