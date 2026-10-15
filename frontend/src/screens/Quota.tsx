@@ -63,7 +63,7 @@ function QuotaView({ q }: { q: QuotaData }) {
       <section className="reading">
         <div className="reading-label">
           {q.anchored
-            ? <>Claude Max, this week · resets {clock.when(q.window.reset)}{q.window.days_left !== null && <> · {left(q.window.days_left)} left</>}</>
+            ? <>Claude {q.plan_label ?? "Max"}, this week · resets {clock.when(q.window.reset)}{q.window.days_left !== null && <> · {left(q.window.days_left)} left</>}</>
             : <>No quota reading yet: the last seven days, in tokens only</>}
         </div>
         <div className="quota-figure">
@@ -86,6 +86,11 @@ function QuotaView({ q }: { q: QuotaData }) {
           {q.reading && (
             <span className="rank-sub">read {clock.when(q.reading.at)} on <span className="mono">{q.reading.machine}</span></span>
           )}
+          {q.plan_change && (
+            <span className="rank-sub">
+              {q.plan_change.from_label} → {q.plan_change.to_label} this week: last read on {q.plan_change.from_label} {clock.when(q.plan_change.last_at)}, first on {q.plan_change.to_label} {clock.when(q.plan_change.at)}
+            </span>
+          )}
         </div>
       </section>
 
@@ -100,7 +105,8 @@ function QuotaView({ q }: { q: QuotaData }) {
             <div className="stat-label">The week's budget</div>
             <div className="stat-value">{t.budget ? `≈ ${fmtTok(t.budget)}` : "—"}</div>
             <div className="stat-sub">
-              {t.budget ? `100%, estimated from ${t.budget_from}` : "needs a reading of 3% or more"}
+              {t.budget ? `100%${q.plan_label ? ` of ${q.plan_label}` : ""}, estimated from ${t.budget_from}`
+                : `needs a reading of 3% or more${q.plan_change ? ` on ${q.plan_change.to_label}` : ""}`}
             </div>
           </div>
           {lastDay ? (
@@ -157,13 +163,18 @@ function QuotaView({ q }: { q: QuotaData }) {
           <section className="section">
             <div className="section-head">
               <h2 className="section-title">Past weeks</h2>
-              <div className="section-note">{q.avg_final_pct != null ? `ended at ${q.avg_final_pct.toFixed(0)}% on average` : "same reset hour"}</div>
+              <div className="section-note">
+                {q.avg_final_pct != null ? `ended at ${q.avg_final_pct.toFixed(0)}% on average${q.plan_label ? ` on ${q.plan_label}` : ""}`
+                  : q.past.some((w) => w.final_pct !== null && !w.same_plan) ? "read on another plan" : "same reset hour"}
+              </div>
             </div>
             <RankRows rows={q.past.filter((w) => w.tokens > 0 || w.final_pct !== null).map((w) => ({
               key: w.start,
               name: <span>{`from ${clock.date(w.start)}`}</span>,
               value: fmtTok(w.tokens),
-              sub: w.final_pct !== null ? `ended at ${w.final_pct.toFixed(0)}%` : "no quota reading",
+              sub: w.final_pct !== null
+                ? `ended at ${w.final_pct.toFixed(0)}%${!w.same_plan && w.plan_label ? ` on ${w.plan_label}` : ""}`
+                : "no quota reading",
               share: pct(w.tokens, pastPeak),
               fill: CLAUDE.fill,
               tone: w.final_pct !== null && w.final_pct >= 95 ? "over" : undefined,
@@ -199,7 +210,9 @@ function QuotaView({ q }: { q: QuotaData }) {
       <p className="rank-sub quota-note">
         The percentage is Anthropic's own reading, passed by Claude Code to its status line, and covers
         claude.ai and the desktop app too. Tokens are Claude Code's only, so the budget in tokens is an
-        estimate: Opus weighs more than Sonnet and cache reads count for little.
+        estimate: Opus weighs more than Sonnet and cache reads count for little. A plan change keeps the
+        reset but rescales the percentage, so the budget and the past weeks' average only use readings
+        on the current plan.
       </p>
     </>
   );

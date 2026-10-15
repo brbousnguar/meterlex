@@ -108,6 +108,10 @@ class QuotaReading(SQLModel, table=True):
     resets_at: datetime                 # naive UTC
     ts: datetime = Field(index=True)    # when it was read, naive UTC
     machine: str = Field(default=HUB_MACHINE)
+    # the subscription tier it was read on (e.g. default_claude_max_20x)
+    plan: Optional[str] = None
+    # a session's own figure moved: the truth at its time even when lower
+    fresh: bool = False
 
 
 class Setting(SQLModel, table=True):

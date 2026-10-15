@@ -492,3 +492,79 @@ def test_an_idle_session_s_stale_lower_figure_is_not_news(tmp_path, monkeypatch,
     nxt = json.loads(json.dumps(STATUS))
     nxt["rate_limits"]["seven_day"].update(used_percentage=1, resets_at=STATUS["rate_limits"]["seven_day"]["resets_at"] + 7 * 86400)
     assert mc.record_quota(mc.quota_readings(nxt, 1_000_000)) == 1     # a new window is news
+
+
+# ── a plan change: a session's own figure dropping is fresh news (#46) ────────
+
+def _paint(session_id, pct, plan=None, resets=1_000_000 + 3 * 86400):
+    import io
+    data = {"session_id": session_id, "model": {"display_name": "Opus 5.5"},
+            "rate_limits": {"seven_day": {"used_percentage": pct, "resets_at": resets}}}
+    with patch_plan(plan):
+        mc.cmd_statusline(io.StringIO(json.dumps(data)))
+
+
+class patch_plan:
+    def __init__(self, plan):
+        self.plan = plan
+
+    def __enter__(self):
+        self.old = mc.claude_plan
+        mc.claude_plan = lambda: self.plan
+
+    def __exit__(self, *exc):
+        mc.claude_plan = self.old
+
+
+def _weeks(tmp_path):
+    return [json.loads(l) for l in (tmp_path / "quota.jsonl").read_text().splitlines()
+            if json.loads(l)["window"] == "seven_day"]
+
+
+def test_a_session_whose_own_figure_drops_reports_a_plan_change(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("METERLEX_HOME", str(tmp_path))
+    monkeypatch.setattr(mc.time, "time", lambda: 1_000_000)
+    _paint("a", 73, "max_5x")
+    _paint("a", 7, "max_5x")                    # the same session, a new answer: the plan grew
+    assert "week 7%" in capsys.readouterr().out.splitlines()[-1]
+    _paint("idle", 70, "max_5x")                # first seen, an old figure: not news after a fresh one
+    _paint("a", 7, "max_5x")                    # a repaint
+    _paint("a", 8, "max_5x")
+    assert [(r["used_pct"], r.get("fresh", False)) for r in _weeks(tmp_path)] == [(73, False), (7, True), (8, True)]
+    assert "week 8%" in capsys.readouterr().out.splitlines()[-1]
+
+
+def test_a_new_plan_is_news_even_from_a_session_first_seen(tmp_path, monkeypatch):
+    monkeypatch.setenv("METERLEX_HOME", str(tmp_path))
+    monkeypatch.setattr(mc.time, "time", lambda: 1_000_000)
+    (tmp_path / "quota-last.json").write_text(json.dumps({"seven_day": [73, 1_000_000 + 3 * 86400]}))  # collector 0.5
+    _paint("b", 7, "default_claude_max_20x")
+    _paint("c", 9, "default_claude_max_20x")    # first seen, higher than a fresh figure: waits for its own move
+    assert [(r["used_pct"], r["plan"], r.get("fresh")) for r in _weeks(tmp_path)] == [(7, "default_claude_max_20x", True)]
+    _paint("b", 8, None)                        # ~/.claude.json unreadable for a moment
+    _paint("d", 70, "default_claude_max_20x")   # an idle session first seen: still not a plan change
+    assert [r["used_pct"] for r in _weeks(tmp_path)] == [7, 8]
+
+
+def test_sessions_are_forgotten_after_a_week_and_a_repaint_does_not_rewrite_state(tmp_path, monkeypatch):
+    monkeypatch.setenv("METERLEX_HOME", str(tmp_path))
+    clock = [1_000_000]
+    monkeypatch.setattr(mc.time, "time", lambda: clock[0])
+    _paint("old", 10)
+    clock[0] += 9 * 86400
+    _paint("new", 1, resets=1_000_000 + 10 * 86400)
+    state = json.loads((tmp_path / "quota-last.json").read_text())
+    assert list(state["sessions"]) == ["new"]
+    before = (tmp_path / "quota-last.json").stat().st_mtime_ns
+    clock[0] += 60
+    _paint("new", 1, resets=1_000_000 + 10 * 86400)
+    assert (tmp_path / "quota-last.json").stat().st_mtime_ns == before
+
+
+def test_the_plan_comes_from_claude_code_s_own_config(tmp_path, monkeypatch):
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path))
+    assert mc.claude_plan() is None
+    (tmp_path / ".claude.json").write_text(json.dumps({"oauthAccount": {
+        "organizationRateLimitTier": "default_claude_max_20x", "userRateLimitTier": None}}))
+    assert mc.claude_plan() == "default_claude_max_20x"
+    assert mc.quota_readings(STATUS, 1_000_000, "default_claude_max_20x")[0]["plan"] == "default_claude_max_20x"

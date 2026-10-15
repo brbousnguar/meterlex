@@ -4,13 +4,19 @@
     docker compose exec backend python manage.py machine-list
     docker compose exec backend python manage.py machine-revoke NAME
     docker compose exec backend python manage.py dedupe-legacy [--apply]
+    docker compose exec backend python manage.py quota-plan PLAN --before ISO_UTC [--apply]
 
 machine-add prints the machine's key once; give it to that machine's collector
 (`meterlex_collector.py setup --hub … --key …`). Re-running it re-keys the machine.
+
+quota-plan names the plan (e.g. default_claude_max_5x) of the quota readings
+taken before BEFORE that carry none, from collectors older than 0.6.0, so a
+plan change splits the past weeks where it happened.
 """
 import argparse
 import json
 import sys
+from datetime import datetime, timezone
 
 from sqlmodel import Session, select, func
 
@@ -18,6 +24,7 @@ from database import engine, create_db
 from models import Machine, UsageTurn
 import ingest
 import machines
+import quota
 
 
 def main(argv=None) -> int:
@@ -32,6 +39,10 @@ def main(argv=None) -> int:
     r.add_argument("name")
     d = sub.add_parser("dedupe-legacy", help="fold old per-line Claude Code rows into one per reply")
     d.add_argument("--apply", action="store_true", help="change the database (default: report only)")
+    q = sub.add_parser("quota-plan", help="name the plan of older quota readings that carry none")
+    q.add_argument("plan", help="e.g. default_claude_max_5x")
+    q.add_argument("--before", required=True, help="ISO time, UTC unless it carries an offset")
+    q.add_argument("--apply", action="store_true", help="change the database (default: report only)")
     args = ap.parse_args(argv)
 
     create_db()
@@ -49,6 +60,12 @@ def main(argv=None) -> int:
             print("revoked" if machines.revoke(session, args.name) else "no such machine")
         elif args.cmd == "dedupe-legacy":
             print(json.dumps(ingest.dedupe_legacy(session, apply=args.apply), indent=1))
+        elif args.cmd == "quota-plan":
+            before = datetime.fromisoformat(args.before.replace("Z", "+00:00"))
+            if before.tzinfo:
+                before = before.astimezone(timezone.utc).replace(tzinfo=None)
+            n = quota.stamp_plan(session, args.plan, before, apply=args.apply)
+            print(f"{n} reading(s) before {before.isoformat()}Z {'now' if args.apply else 'would be'} on {args.plan}")
 
     return 0
 

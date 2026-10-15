@@ -10,7 +10,9 @@ const L = 34, R = 10, T = 10, B = 26;
 /**
  * The week's quota against an even pace. The percentage is only known when a Claude Code session
  * reads it, so the thick line joins the readings and the thin one estimates the hours between them
- * from tokens (tokens so far ÷ the week's budget). Like the bar charts, the whole plot is the hit
+ * from tokens (tokens so far ÷ the week's budget). A plan change keeps the reset but rescales the
+ * percentage, so the line steps down where the new plan's first reading lands, and a mark names
+ * the new plan. Like the bar charts, the whole plot is the hit
  * target: pointing at an hour shows a readout beside the pointer (a panel above the plot on a
  * phone), and it leaves with the pointer. ← → move an hour, Shift ← → a day, Home End, Esc clears.
  */
@@ -44,7 +46,11 @@ export default function WeekLine({ q }: { q: Quota }) {
   const y = (v: number) => T + (1 - Math.min(v, yMax) / yMax) * (H - T - B);
   const pts = [{ ms: start, pct: 0 }, ...q.history.map((h) => ({ ms: Date.parse(h.at), pct: h.pct }))];
   if (q.used_pct !== null) pts.push({ ms: now, pct: q.used_pct });
-  const used = pts.map((p, i) => `${i ? "L" : "M"}${x(p.ms)},${y(p.pct)}`).join("");
+  // readings join up as the week fills; a drop (a bigger plan) is a step, not a slope
+  const used = pts.map((p, i) => i === 0 ? `M${x(p.ms)},${y(p.pct)}`
+    : p.pct < pts[i - 1].pct ? `L${x(p.ms)},${y(pts[i - 1].pct)}L${x(p.ms)},${y(p.pct)}`
+    : `L${x(p.ms)},${y(p.pct)}`).join("");
+  const change = q.plan_change ? Date.parse(q.plan_change.at) : null;
 
   const cum: number[] = [];
   q.hourly.reduce((acc, v, i) => (cum[i] = acc + v), 0);
@@ -129,7 +135,8 @@ export default function WeekLine({ q }: { q: Quota }) {
           <>
             <div className="ro-value">{known ? `${known.pct.toFixed(0)}%` : estPct !== null ? `≈ ${estPct.toFixed(0)}%` : "—"}</div>
             <div className="ro-line">
-              {known ? <>last read {readAt}</> : estPct !== null ? <>estimated from tokens</> : <>no reading yet</>}
+              {known ? <>last read {readAt}{q.plan_change && known.plan_label ? ` on ${known.plan_label}` : ""}</>
+                : estPct !== null ? <>estimated from tokens</> : <>no reading yet</>}
               {" · "}even pace <b>{pace.toFixed(0)}%</b>
             </div>
           </>
@@ -179,6 +186,13 @@ export default function WeekLine({ q }: { q: Quota }) {
           {q.pace?.projected_pct != null && q.used_pct !== null && (
             <line x1={x(now)} y1={y(q.used_pct)} x2={x(start + WEEK_MS)} y2={y(q.pace.projected_pct)} className="ql-proj" />
           )}
+          {change !== null && q.plan_change && (
+            <g className="ql-plan">
+              <line x1={x(change)} x2={x(change)} y1={T} y2={H - B} />
+              <text x={x(change) + (x(change) > W - 90 ? -5 : 5)} y={T + 12}
+                    textAnchor={x(change) > W - 90 ? "end" : "start"} className="ql-tick">{q.plan_change.to_label}</text>
+            </g>
+          )}
           <path d={used} className="ql-used" />
           {q.history.map((h) => (
             <rect key={h.at} x={x(Date.parse(h.at)) - 3} y={y(h.pct) - 3} width="6" height="6" className="ql-read" />
@@ -199,6 +213,7 @@ export default function WeekLine({ q }: { q: Quota }) {
         {est && <li><i className="k-est" />estimated from tokens</li>}
         <li><i className="k-pace" />an even week</li>
         {q.pace?.projected_pct != null && <li><i className="k-proj" />at this rate</li>}
+        {q.plan_change && <li><i className="k-plan" />plan changed</li>}
       </ul>
     </div>
   );
