@@ -117,12 +117,15 @@ def test_a_stale_lower_figure_from_an_idle_session_does_not_pull_the_week_down(s
 
 # ── a plan change: same reset, a rescaled percentage (#46) ────────────────────
 
-def test_a_fresh_lower_figure_on_a_new_plan_sets_the_week_and_its_budget(session):
+def _switch_week(session):
+    """73% on Max 5x, then Max 20x: 5% when first read, a tick to 6%, then 10%."""
     m = _machine(session)
     prev_start = START - timedelta(days=7)
     _turn(session, prev_start + timedelta(days=1), 500)
     _turn(session, START + timedelta(hours=1), 730)
     _turn(session, START + timedelta(days=4), 270)
+    _turn(session, START + timedelta(days=4, hours=4), 40)
+    _turn(session, START + timedelta(days=4, hours=5), 40)
     five, twenty = "default_claude_max_5x", "default_claude_max_20x"
     ingest.ingest_quota(session, m, [
         dict(_reading(prev_start + timedelta(days=2), 100.0, reset=START), plan=five),
@@ -130,17 +133,53 @@ def test_a_fresh_lower_figure_on_a_new_plan_sets_the_week_and_its_budget(session
         dict(_reading(START + timedelta(days=4, hours=1), 5.0), plan=twenty, fresh=True),
         _reading(START + timedelta(days=4, hours=2), 70.0),               # an idle session, old figure
         dict(_reading(START + timedelta(days=4, hours=3), 6.0), plan=twenty, fresh=True),
+        dict(_reading(START + timedelta(days=4, hours=6), 10.0), plan=twenty, fresh=True),
+        dict(_reading(START + timedelta(days=4, hours=7), 8.0), plan=twenty, fresh=True),   # fallen behind
         dict(_reading(START + timedelta(days=3, hours=2), 100.0, reset=START + timedelta(days=3, hours=4),
                       window="five_hour"), plan=five),      # the 5-hour cap, after the last weekly 5x reading
     ])
+    return five, twenty
+
+
+def test_a_fresh_lower_figure_on_a_new_plan_sets_the_week_and_its_budget(session):
+    _, twenty = _switch_week(session)
     v = quota.view(session, START + timedelta(days=5), PARIS)
-    assert v["used_pct"] == 6.0 and v["plan"] == twenty and v["plan_label"] == "Max 20x"
-    assert [h["pct"] for h in v["history"]] == [73.0, 5.0, 6.0]
+    assert v["used_pct"] == 10.0 and v["plan"] == twenty and v["plan_label"] == "Max 20x"
+    assert [h["pct"] for h in v["history"]] == [73.0, 5.0, 6.0, 10.0]
     assert v["plan_change"]["from_label"] == "Max 5x" and v["plan_change"]["to_label"] == "Max 20x"
     assert (v["plan_change"]["last_at"], v["plan_change"]["at"]) == ("2026-10-06T11:00:00Z", "2026-10-07T10:00:00Z")
-    assert (v["tokens"]["budget"], v["tokens"]["budget_from"]) == (round(1000 / 0.06), "this week")
+    # 80 tokens from the tick at 6% to 10%, not the week's 1080 ÷ 10%
+    assert (v["tokens"]["budget"], v["tokens"]["budget_from"]) == (2000, "the 4 points since the switch")
+    assert v["tokens"]["left"] == {"tokens": 1800, "per_day": round(1800 / 2)}
+    assert v["tokens"]["estimate"] == [
+        {"from": "2026-10-03T09:00:00Z", "to": "2026-10-06T11:00:00Z", "pct": 0.0, "tokens": 0,
+         "budget": 1000, "plan_label": "Max 5x"},
+        {"from": "2026-10-07T12:00:00Z", "to": None, "pct": 6.0, "tokens": 1000,
+         "budget": 2000, "plan_label": "Max 20x"},
+    ]
     assert v["past"][0]["final_pct"] == 100.0 and v["past"][0]["plan_label"] == "Max 5x"
     assert v["past"][0]["same_plan"] is False and v["avg_final_pct"] is None
+
+
+def test_a_week_with_a_switch_lends_the_new_plans_budget(session):
+    _switch_week(session)
+    v = quota.view(session, RESET + timedelta(hours=1), PARIS)
+    assert v["past"][0]["final_pct"] == 10.0 and v["past"][0]["budget"] == 2000 and v["past"][0]["same_plan"]
+    assert (v["tokens"]["budget"], v["tokens"]["budget_from"]) == (2000, "the last 1 week")
+    assert v["tokens"]["estimate"] == [] and v["tokens"]["left"]["tokens"] == 2000
+
+
+def test_a_switch_lends_no_budget_until_three_points_after_its_first_tick(session):
+    m = _machine(session)
+    _turn(session, START + timedelta(hours=1), 730)
+    ingest.ingest_quota(session, m, [
+        dict(_reading(START + timedelta(days=3), 73.0), plan="default_claude_max_5x"),
+        dict(_reading(START + timedelta(days=4), 7.0), plan="default_claude_max_20x", fresh=True),
+        dict(_reading(START + timedelta(days=4, hours=1), 9.0), plan="default_claude_max_20x", fresh=True),
+    ])
+    v = quota.view(session, START + timedelta(days=5), PARIS)
+    assert v["tokens"]["budget"] is None and v["tokens"]["left"] is None
+    assert [e["plan_label"] for e in v["tokens"]["estimate"]] == ["Max 5x"]
 
 
 def test_past_weeks_on_another_plan_lend_no_budget(session):

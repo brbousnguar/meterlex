@@ -11,7 +11,10 @@ turns — so the percentage stays the figure to trust.
 
 A plan change (Max 5x to Max 20x, say) keeps the reset but rescales the
 percentage, so a figure only compares with figures read on the same plan:
-the budget and the past weeks' average use those alone.
+the budget and the past weeks' average use those alone. Whether the new plan's
+figure counts the whole week or only the time since the switch is not known,
+so after a switch the budget is the tokens between two of its readings ÷ the
+points gained between them, which holds either way.
 """
 import re
 from collections import defaultdict
@@ -70,22 +73,62 @@ def _in_window(r: QuotaReading, reset: datetime) -> bool:
 
 
 def _line(rs: list) -> list:
-    """The readings that moved the figure, in time order. A fresh reading (a
-    session whose own figure just moved) is the truth at its time, even when
-    it is lower, as after a plan change. Any other reading may be an idle
-    session repainting an old figure, so it can only raise it, and once a
-    fresh reading has set the figure, only when it names the same plan (a
-    collector older than 0.6.0 names none)."""
-    out, top, fresh_plan = [], None, None
+    """The readings that moved the figure, in time order. Within one plan the
+    figure only rises: every open Claude Code session repaints the last figure
+    it was given, so a lower one is a session that has fallen behind, even a
+    fresh one (a session whose own figure just moved). A plan change rescales
+    the figure, so a fresh reading that names another plan sets it even when
+    it is lower. Once a fresh reading has set the figure, other readings only
+    count when they name the same plan (a collector older than 0.6.0 names
+    none)."""
+    out, top, fresh_plan, plan = [], None, None, None
     for r in sorted(rs, key=lambda r: r.ts):
         if r.fresh:
             fresh_plan = r.plan or ""
         elif fresh_plan is not None and (r.plan or "") != fresh_plan:
             continue
-        if top is None or r.used_pct > top or (r.fresh and r.used_pct != top):
+        switch = r.fresh and r.plan is not None and r.plan != plan
+        if top is None or r.used_pct > top or (switch and r.used_pct != top):
             out.append(r)
             top = r.used_pct
+            plan = r.plan or plan
     return out
+
+
+def _parts(line: list) -> list:
+    """A window's line cut at each switch between two named plans: each part
+    is on its own plan's scale."""
+    parts, plan = [], None
+    for r in line:
+        if parts and not (r.plan and plan and r.plan != plan):
+            parts[-1].append(r)
+        else:
+            parts.append([r])
+        plan = r.plan or plan
+    return parts
+
+
+def _base(part: list, first: bool, start: datetime) -> Optional[tuple]:
+    """(time, percentage) where a part's figure is known to the point. The
+    window's first part starts at the reset, from 0%. After a plan change the
+    new figure may count the whole week or only the time since the switch, so
+    the part starts at its first tick: the first reading above the one before
+    it, when the figure has just crossed a whole point."""
+    if first:
+        return start, 0.0
+    tick = next((b for a, b in zip(part, part[1:]) if b.used_pct > a.used_pct), None)
+    return (tick.ts, tick.used_pct) if tick else None
+
+
+def _part_budget(part: list, base: Optional[tuple], tokens_between) -> Optional[float]:
+    """Tokens from the part's base to its latest reading ÷ the points gained."""
+    if base is None:
+        return None
+    r = part[-1]
+    gained = r.used_pct - base[1]
+    if r.ts <= base[0] or gained < MIN_PCT_FOR_BUDGET:
+        return None
+    return tokens_between(base[0], r.ts) / (gained / 100)
 
 
 def plan_label(plan: Optional[str]) -> Optional[str]:
@@ -106,6 +149,12 @@ def _plan_of(rs: list) -> Optional[str]:
     return next((r.plan for r in sorted(rs, key=lambda r: r.ts, reverse=True) if r.plan), None)
 
 
+def _last_on(session: Session, plan: Optional[str], before: datetime) -> Optional[datetime]:
+    """The last reading on a plan before a time, in either window."""
+    return session.exec(select(QuotaReading.ts).where(
+        QuotaReading.plan == plan, QuotaReading.ts < before).order_by(QuotaReading.ts.desc())).first()
+
+
 def _plan_change(session: Session, line: list) -> Optional[dict]:
     """The last switch between two named plans along a window's line. It
     happened after the last reading on the old plan and before the first on
@@ -120,8 +169,7 @@ def _plan_change(session: Session, line: list) -> Optional[dict]:
     if change is None:
         return None
     old, new = change
-    last = session.exec(select(QuotaReading.ts).where(
-        QuotaReading.plan == old.plan, QuotaReading.ts < new.ts).order_by(QuotaReading.ts.desc())).first()
+    last = _last_on(session, old.plan, new.ts)
     first = session.exec(select(QuotaReading.ts).where(
         QuotaReading.plan == new.plan, QuotaReading.ts > (last or old.ts)).order_by(QuotaReading.ts)).first()
     return {"from": old.plan, "to": new.plan, "from_label": plan_label(old.plan), "to_label": plan_label(new.plan),
@@ -164,11 +212,15 @@ def view(session: Session, now: datetime, tz: ZoneInfo) -> dict:
     elapsed = min(1.0, max(0.0, (now - start) / WEEK))
     used_tokens = tokens_between(start, now)
 
+    # each plan's part of the line has its own budget; the current plan's is the week's
+    parts = _parts(current)
+    bases = [_base(part, i == 0, start) for i, part in enumerate(parts)]
+    budgets = [_part_budget(part, base, tokens_between) for part, base in zip(parts, bases)]
     budget, budget_from = None, None
-    for r in reversed(current):
-        if r.used_pct >= MIN_PCT_FOR_BUDGET and r.plan == plan:
-            budget, budget_from = tokens_between(start, r.ts) / (r.used_pct / 100), "this week"
-            break
+    if parts and budgets[-1] and _plan_of(parts[-1]) == plan:
+        budget = budgets[-1]
+        budget_from = "this week" if len(parts) == 1 \
+            else f"the {parts[-1][-1].used_pct - bases[-1][1]:.0f} points since the switch"
 
     # ── past windows, on the same anchor ────────────────────────────────────
     past = []
@@ -178,9 +230,9 @@ def view(session: Session, now: datetime, tz: ZoneInfo) -> dict:
         p_line = _line([r for r in week_readings if _in_window(r, p_reset)])
         top = p_line[-1] if p_line else None
         tok = tokens_between(p_start, p_reset)
-        p_budget = None
-        if top is not None and top.used_pct >= MIN_PCT_FOR_BUDGET:
-            p_budget = tokens_between(p_start, top.ts) / (top.used_pct / 100)
+        p_parts = _parts(p_line)
+        p_budget = _part_budget(p_parts[-1], _base(p_parts[-1], len(p_parts) == 1, p_start), tokens_between) \
+            if p_parts else None
         p_plan = top.plan if top is not None else None
         past.append({
             "start": _iso(p_start), "reset": _iso(p_reset),
@@ -193,6 +245,18 @@ def view(session: Session, now: datetime, tz: ZoneInfo) -> dict:
         known = [p["budget"] for p in past if p["budget"] and p["same_plan"]][:4]
         if known:
             budget, budget_from = sum(known) / len(known), f"the last {len(known)} week{'s' if len(known) > 1 else ''}"
+    if parts:
+        budgets[-1] = budget
+
+    # the line's estimate from tokens: each part from its base, on its own budget,
+    # until the last reading on its plan
+    estimate = []
+    for i, (part, base, b) in enumerate(zip(parts, bases, budgets)):
+        if base is None or not b:
+            continue
+        to = None if i == len(parts) - 1 else max(part[-1].ts, _last_on(session, _plan_of(part), parts[i + 1][0].ts) or part[-1].ts)
+        estimate.append({"from": _iso(base[0]), "to": _iso(to), "pct": base[1], "tokens": tokens_between(start, base[0]),
+                         "budget": round(b), "plan_label": plan_label(_plan_of(part))})
 
     full_past = [p for p in past if p["tokens"] > 0][:4]
     avg_day = sum(p["tokens"] for p in full_past) / (7 * len(full_past)) if full_past else None
@@ -212,7 +276,8 @@ def view(session: Session, now: datetime, tz: ZoneInfo) -> dict:
     left = None
     days_left = (reset - now) / DAY if anchored else None
     if budget:
-        remaining = max(0.0, budget - used_tokens)
+        # what the percentage leaves, less what was spent since it was read
+        remaining = max(0.0, budget * (100 - (used_pct or 0)) / 100 - tokens_between(reading.ts if reading else start, now))
         left = {
             "tokens": round(remaining),
             "per_day": round(remaining / days_left) if days_left and days_left > 0.04 else None,
@@ -286,6 +351,7 @@ def view(session: Session, now: datetime, tz: ZoneInfo) -> dict:
             "avg_day_past": round(avg_day) if avg_day is not None else None,
             "budget": round(budget) if budget else None,
             "budget_from": budget_from,
+            "estimate": estimate,
             "left": left,
         },
         "five_hour": five_hour,

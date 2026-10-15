@@ -10,9 +10,9 @@ const L = 34, R = 10, T = 10, B = 26;
 /**
  * The week's quota against an even pace. The percentage is only known when a Claude Code session
  * reads it, so the thick line joins the readings and the thin one estimates the hours between them
- * from tokens (tokens so far ÷ the week's budget). A plan change keeps the reset but rescales the
- * percentage, so a delimiter splits the week where it happened: each side is its own series, on its
- * own plan's scale, and nothing joins them. Like the bar charts, the whole plot is the hit
+ * from tokens (tokens since a known percentage ÷ the budget). A plan change keeps the reset but
+ * rescales the percentage, so a delimiter splits the week where it happened: each side is its own
+ * series, with its own estimate on its own plan's budget, and nothing joins them. Like the bar charts, the whole plot is the hit
  * target: pointing at an hour shows a readout beside the pointer (a panel above the plot on a
  * phone), and it leaves with the pointer. ← → move an hour, Shift ← → a day, Home End, Esc clears.
  */
@@ -60,9 +60,16 @@ export default function WeekLine({ q }: { q: Quota }) {
   const cum: number[] = [];
   q.hourly.reduce((acc, v, i) => (cum[i] = acc + v), 0);
   const budget = q.tokens.budget;
-  const est = budget
-    ? [`M${x(start)},${y(0)}`, ...cum.slice(0, nowH + 1).map((c, i) =>
-        `L${x(Math.min(now, start + (i + 1) * HOUR))},${y((c / budget) * 100)}`)].join("")
+  // each plan's estimate runs from where its percentage is known, on its own budget
+  const parts = q.tokens.estimate.map((e) => ({ ...e, fromMs: Date.parse(e.from), toMs: e.to ? Date.parse(e.to) : null }));
+  const inPart = (p: (typeof parts)[number], i: number) => {
+    const end = start + (i + 1) * HOUR;
+    return end > p.fromMs && (p.toMs === null || end <= p.toMs);
+  };
+  const estOf = (p: (typeof parts)[number], i: number) => p.pct + ((cum[i] - p.tokens) / p.budget) * 100;
+  const est = parts.length
+    ? parts.map((p) => [`M${x(p.fromMs)},${y(p.pct)}`, ...cum.slice(0, nowH + 1).flatMap((_, i) => inPart(p, i)
+        ? [`L${x(Math.min(now, start + (i + 1) * HOUR))},${y(estOf(p, i))}`] : [])].join("")).join("")
     : null;
 
   // ── the picked hour ────────────────────────────────────────────────────────
@@ -75,15 +82,15 @@ export default function WeekLine({ q }: { q: Quota }) {
   const known = [...q.history].reverse().find((h) => Date.parse(h.at) <= hEnd && (!afterCut || Date.parse(h.at) > cut)) ?? null;
   const hourPlan = pc ? (afterCut ? pc.to_label : pc.from_label) : null;
   const soFar = future ? null : cum[sel] ?? 0;
-  const estPct = budget && soFar !== null ? (soFar / budget) * 100 : null;
+  const part = future ? undefined : parts.find((p) => inPart(p, sel));
+  const estPct = part ? estOf(part, sel) : null;
   const projAt = q.pace?.projected_pct != null && q.used_pct !== null
     ? q.used_pct + (q.pace.projected_pct - q.used_pct) * ((hEnd - now) / Math.max(1, start + WEEK_MS - now))
     : null;
   const ref = future ? projAt : known?.pct ?? (estPct ?? null);
   const delta = ref !== null ? ref - pace : null;
-  // before the switch the estimate is on the new plan's budget, so the reading stays the mark
   const markY = future ? projAt
-    : (known && (hEnd - Date.parse(known.at) < 3 * HOUR || (pc && !afterCut)) ? known.pct : estPct ?? known?.pct ?? null);
+    : (known && hEnd - Date.parse(known.at) < 3 * HOUR ? known.pct : estPct ?? known?.pct ?? null);
 
   const tz = q.tz;
   const when = new Date(hStart).toLocaleString("en-GB", { timeZone: tz, weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
@@ -146,7 +153,8 @@ export default function WeekLine({ q }: { q: Quota }) {
             <div className="ro-value">{known ? `${known.pct.toFixed(0)}%` : estPct !== null ? `≈ ${estPct.toFixed(0)}%` : "—"}</div>
             <div className="ro-line">
               {known ? <>last read {readAt}{hourPlan ? ` on ${hourPlan}` : ""}</>
-                : estPct !== null ? <>estimated from tokens{pc ? ` on ${pc.to_label}` : ""}</> : <>no reading yet</>}
+                : estPct !== null ? <>estimated from tokens{hourPlan ? ` on ${hourPlan}` : ""}</>
+                : <>no reading yet{hourPlan ? ` on ${hourPlan}` : ""}</>}
               {" · "}even pace <b>{pace.toFixed(0)}%</b>
             </div>
           </>
@@ -166,7 +174,7 @@ export default function WeekLine({ q }: { q: Quota }) {
           <ul className="ro-list">
             <li className="ro-sub"><span className="ro-name">tokens this hour</span><span className="ro-val">{fmtTok(q.hourly[sel] ?? 0)}</span></li>
             <li className="ro-sub"><span className="ro-name">tokens so far</span><span className="ro-val">{fmtTok(soFar ?? 0)}</span></li>
-            {estPct !== null && known && !(pc && !afterCut) && (
+            {estPct !== null && known && (
               <li className="ro-sub"><span className="ro-name">from tokens</span><span className="ro-val">≈ {estPct.toFixed(0)}%</span></li>
             )}
           </ul>

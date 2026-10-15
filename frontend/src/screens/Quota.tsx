@@ -106,7 +106,7 @@ function QuotaView({ q }: { q: QuotaData }) {
             <div className="stat-value">{t.budget ? `≈ ${fmtTok(t.budget)}` : "—"}</div>
             <div className="stat-sub">
               {t.budget ? `100%${q.plan_label ? ` of ${q.plan_label}` : ""}, estimated from ${t.budget_from}`
-                : `needs a reading of 3% or more${q.plan_change ? ` on ${q.plan_change.to_label}` : ""}`}
+                : q.plan_change ? `needs 3 points gained on ${q.plan_change.to_label}` : "needs a reading of 3% or more"}
             </div>
           </div>
           {lastDay ? (
@@ -210,9 +210,10 @@ function QuotaView({ q }: { q: QuotaData }) {
       <p className="rank-sub quota-note">
         The percentage is Anthropic's own reading, passed by Claude Code to its status line, and covers
         claude.ai and the desktop app too. Tokens are Claude Code's only, so the budget in tokens is an
-        estimate: Opus weighs more than Sonnet and cache reads count for little. A plan change keeps the
-        reset but rescales the percentage, so the budget and the past weeks' average only use readings
-        on the current plan.
+        estimate that moves with the model mix: a token of a dearer model takes more of the quota, and
+        cache reads count for little. A plan change keeps the reset but rescales the percentage, so the
+        budget and the past weeks' average only use readings on the current plan, and after a switch
+        the budget comes from the points gained since.
       </p>
     </>
   );
