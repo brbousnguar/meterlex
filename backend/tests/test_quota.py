@@ -130,12 +130,14 @@ def test_a_fresh_lower_figure_on_a_new_plan_sets_the_week_and_its_budget(session
         dict(_reading(START + timedelta(days=4, hours=1), 5.0), plan=twenty, fresh=True),
         _reading(START + timedelta(days=4, hours=2), 70.0),               # an idle session, old figure
         dict(_reading(START + timedelta(days=4, hours=3), 6.0), plan=twenty, fresh=True),
+        dict(_reading(START + timedelta(days=3, hours=2), 100.0, reset=START + timedelta(days=3, hours=4),
+                      window="five_hour"), plan=five),      # the 5-hour cap, after the last weekly 5x reading
     ])
     v = quota.view(session, START + timedelta(days=5), PARIS)
     assert v["used_pct"] == 6.0 and v["plan"] == twenty and v["plan_label"] == "Max 20x"
     assert [h["pct"] for h in v["history"]] == [73.0, 5.0, 6.0]
     assert v["plan_change"]["from_label"] == "Max 5x" and v["plan_change"]["to_label"] == "Max 20x"
-    assert v["plan_change"]["at"] == "2026-10-07T10:00:00Z"
+    assert (v["plan_change"]["last_at"], v["plan_change"]["at"]) == ("2026-10-06T11:00:00Z", "2026-10-07T10:00:00Z")
     assert (v["tokens"]["budget"], v["tokens"]["budget_from"]) == (round(1000 / 0.06), "this week")
     assert v["past"][0]["final_pct"] == 100.0 and v["past"][0]["plan_label"] == "Max 5x"
     assert v["past"][0]["same_plan"] is False and v["avg_final_pct"] is None

@@ -202,8 +202,10 @@ them with the turns. One machine is enough: the quota belongs to the account.
   Max 5x to Max 20x took the week from 73% to 7% within the same window. Each
   reading carries the plan Claude Code is signed in on (`oauthAccount`'s rate
   limit tier in `~/.claude.json`), and a new plan is fresh news. The screen
-  names the plan, steps the line down where the new plan's first reading lands,
-  and only lets weeks on the current plan lend a budget or an average. Readings
+  names the plan, and the week line puts a delimiter where it changed (after
+  the last reading on the old plan, in either window): each side is its own
+  series on its own scale, and an hour's readout only reads its own side. Only
+  weeks on the current plan lend a budget or an average. Readings
   from collectors older than 0.6.0 carry no plan:
   `manage.py quota-plan default_claude_max_5x --before <ISO time> --apply`
   names it for the ones before a switch.

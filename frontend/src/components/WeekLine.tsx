@@ -11,8 +11,8 @@ const L = 34, R = 10, T = 10, B = 26;
  * The week's quota against an even pace. The percentage is only known when a Claude Code session
  * reads it, so the thick line joins the readings and the thin one estimates the hours between them
  * from tokens (tokens so far ÷ the week's budget). A plan change keeps the reset but rescales the
- * percentage, so the line steps down where the new plan's first reading lands, and a mark names
- * the new plan. Like the bar charts, the whole plot is the hit
+ * percentage, so a delimiter splits the week where it happened: each side is its own series, on its
+ * own plan's scale, and nothing joins them. Like the bar charts, the whole plot is the hit
  * target: pointing at an hour shows a readout beside the pointer (a panel above the plot on a
  * phone), and it leaves with the pointer. ← → move an hour, Shift ← → a day, Home End, Esc clears.
  */
@@ -44,13 +44,18 @@ export default function WeekLine({ q }: { q: Quota }) {
   const yMax = top > 100 ? Math.ceil(top / 25) * 25 : 100;
   const x = (ms: number) => L + ((ms - start) / WEEK_MS) * (W - L - R);
   const y = (v: number) => T + (1 - Math.min(v, yMax) / yMax) * (H - T - B);
-  const pts = [{ ms: start, pct: 0 }, ...q.history.map((h) => ({ ms: Date.parse(h.at), pct: h.pct }))];
-  if (q.used_pct !== null) pts.push({ ms: now, pct: q.used_pct });
-  // readings join up as the week fills; a drop (a bigger plan) is a step, not a slope
-  const used = pts.map((p, i) => i === 0 ? `M${x(p.ms)},${y(p.pct)}`
-    : p.pct < pts[i - 1].pct ? `L${x(p.ms)},${y(pts[i - 1].pct)}L${x(p.ms)},${y(p.pct)}`
-    : `L${x(p.ms)},${y(p.pct)}`).join("");
-  const change = q.plan_change ? Date.parse(q.plan_change.at) : null;
+  // The plan changed after its last reading on the old plan: the delimiter goes there.
+  const pc = q.plan_change;
+  const cut = pc ? Date.parse(pc.last_at) : null;
+  const hist = q.history.map((h) => ({ ms: Date.parse(h.at), pct: h.pct }));
+  const tail = q.used_pct !== null ? [{ ms: now, pct: q.used_pct }] : [];
+  const series = cut === null
+    ? [[{ ms: start, pct: 0 }, ...hist, ...tail]]
+    : [[{ ms: start, pct: 0 }, ...hist.filter((p) => p.ms <= cut)], [...hist.filter((p) => p.ms > cut), ...tail]];
+  // readings join up as the week fills; a drop inside one plan is a step, not a slope
+  const used = series.filter((ps) => ps.length > 1).map((ps) => ps.map((p, i) => i === 0 ? `M${x(p.ms)},${y(p.pct)}`
+    : p.pct < ps[i - 1].pct ? `L${x(p.ms)},${y(ps[i - 1].pct)}L${x(p.ms)},${y(p.pct)}`
+    : `L${x(p.ms)},${y(p.pct)}`).join("")).join("");
 
   const cum: number[] = [];
   q.hourly.reduce((acc, v, i) => (cum[i] = acc + v), 0);
@@ -65,7 +70,10 @@ export default function WeekLine({ q }: { q: Quota }) {
   const at = Math.min(hEnd, now);
   const future = hStart >= now;
   const pace = ((hEnd - start) / WEEK_MS) * 100;
-  const known = [...q.history].reverse().find((h) => Date.parse(h.at) <= hEnd) ?? null;
+  // an hour reads only its own side of the delimiter: a Max 5x figure says nothing after the switch
+  const afterCut = cut !== null && hEnd > cut;
+  const known = [...q.history].reverse().find((h) => Date.parse(h.at) <= hEnd && (!afterCut || Date.parse(h.at) > cut)) ?? null;
+  const hourPlan = pc ? (afterCut ? pc.to_label : pc.from_label) : null;
   const soFar = future ? null : cum[sel] ?? 0;
   const estPct = budget && soFar !== null ? (soFar / budget) * 100 : null;
   const projAt = q.pace?.projected_pct != null && q.used_pct !== null
@@ -73,7 +81,9 @@ export default function WeekLine({ q }: { q: Quota }) {
     : null;
   const ref = future ? projAt : known?.pct ?? (estPct ?? null);
   const delta = ref !== null ? ref - pace : null;
-  const markY = future ? projAt : (known && hEnd - Date.parse(known.at) < 3 * HOUR ? known.pct : estPct ?? known?.pct ?? null);
+  // before the switch the estimate is on the new plan's budget, so the reading stays the mark
+  const markY = future ? projAt
+    : (known && (hEnd - Date.parse(known.at) < 3 * HOUR || (pc && !afterCut)) ? known.pct : estPct ?? known?.pct ?? null);
 
   const tz = q.tz;
   const when = new Date(hStart).toLocaleString("en-GB", { timeZone: tz, weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
@@ -135,8 +145,8 @@ export default function WeekLine({ q }: { q: Quota }) {
           <>
             <div className="ro-value">{known ? `${known.pct.toFixed(0)}%` : estPct !== null ? `≈ ${estPct.toFixed(0)}%` : "—"}</div>
             <div className="ro-line">
-              {known ? <>last read {readAt}{q.plan_change && known.plan_label ? ` on ${known.plan_label}` : ""}</>
-                : estPct !== null ? <>estimated from tokens</> : <>no reading yet</>}
+              {known ? <>last read {readAt}{hourPlan ? ` on ${hourPlan}` : ""}</>
+                : estPct !== null ? <>estimated from tokens{pc ? ` on ${pc.to_label}` : ""}</> : <>no reading yet</>}
               {" · "}even pace <b>{pace.toFixed(0)}%</b>
             </div>
           </>
@@ -156,7 +166,7 @@ export default function WeekLine({ q }: { q: Quota }) {
           <ul className="ro-list">
             <li className="ro-sub"><span className="ro-name">tokens this hour</span><span className="ro-val">{fmtTok(q.hourly[sel] ?? 0)}</span></li>
             <li className="ro-sub"><span className="ro-name">tokens so far</span><span className="ro-val">{fmtTok(soFar ?? 0)}</span></li>
-            {estPct !== null && known && (
+            {estPct !== null && known && !(pc && !afterCut) && (
               <li className="ro-sub"><span className="ro-name">from tokens</span><span className="ro-val">≈ {estPct.toFixed(0)}%</span></li>
             )}
           </ul>
@@ -169,6 +179,7 @@ export default function WeekLine({ q }: { q: Quota }) {
            onFocus={() => setReading(true)} onBlur={() => leave()} onKeyDown={onKey}>
         <svg className="quota-line" viewBox={`0 0 ${W} ${H}`} role="img"
              aria-label={`Quota used over the week: ${q.used_pct?.toFixed(0)}% now, ${q.window.elapsed_pct.toFixed(0)}% of the week gone`}>
+          {cut !== null && <rect x={L} y={T} width={Math.max(0, x(cut) - L)} height={H - T - B} className="ql-plan-old" />}
           {ticks.map((v) => (
             <g key={v}>
               <line x1={L} x2={W - R} y1={y(v)} y2={y(v)} className={v === 100 ? "ql-limit" : "ql-grid"} />
@@ -186,11 +197,11 @@ export default function WeekLine({ q }: { q: Quota }) {
           {q.pace?.projected_pct != null && q.used_pct !== null && (
             <line x1={x(now)} y1={y(q.used_pct)} x2={x(start + WEEK_MS)} y2={y(q.pace.projected_pct)} className="ql-proj" />
           )}
-          {change !== null && q.plan_change && (
+          {cut !== null && pc && (
             <g className="ql-plan">
-              <line x1={x(change)} x2={x(change)} y1={T} y2={H - B} />
-              <text x={x(change) + (x(change) > W - 90 ? -5 : 5)} y={T + 12}
-                    textAnchor={x(change) > W - 90 ? "end" : "start"} className="ql-tick">{q.plan_change.to_label}</text>
+              <line x1={x(cut)} x2={x(cut)} y1={T} y2={H - B} />
+              {x(cut) - L > 56 && <text x={x(cut) - 7} y={T + 14} textAnchor="end" className="ql-plan-label">{pc.from_label}</text>}
+              {W - R - x(cut) > 62 && <text x={x(cut) + 7} y={T + 14} textAnchor="start" className="ql-plan-label">{pc.to_label}</text>}
             </g>
           )}
           <path d={used} className="ql-used" />
@@ -213,7 +224,9 @@ export default function WeekLine({ q }: { q: Quota }) {
         {est && <li><i className="k-est" />estimated from tokens</li>}
         <li><i className="k-pace" />an even week</li>
         {q.pace?.projected_pct != null && <li><i className="k-proj" />at this rate</li>}
-        {q.plan_change && <li><i className="k-plan" />plan changed</li>}
+        {pc && cut !== null && (
+          <li><i className="k-plan" />{pc.from_label} → {pc.to_label} after {new Date(cut).toLocaleString("en-GB", { timeZone: tz, weekday: "short", hour: "2-digit", minute: "2-digit" })}</li>
+        )}
       </ul>
     </div>
   );
