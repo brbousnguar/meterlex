@@ -204,17 +204,25 @@ them with the turns. One machine is enough: the quota belongs to the account.
   limit tier in `~/.claude.json`), and a new plan is fresh news. The screen
   names the plan, and the week line puts a delimiter where it changed (after
   the last reading on the old plan, in either window): each side is its own
-  series on its own scale, and an hour's readout only reads its own side. Only
-  weeks on the current plan lend a budget or an average. Readings
+  series on its own scale, with its own estimate from tokens, and an hour's
+  readout only reads its own side. Only weeks on the current plan lend a budget
+  or an average. Within one plan the figure only rises: a lower one, even from
+  a session whose own figure just moved, is a session that has fallen behind. Readings
   from collectors older than 0.6.0 carry no plan:
   `manage.py quota-plan default_claude_max_5x --before <ISO time> --apply`
   names it for the ones before a switch.
 - **The week runs from the reset, not Monday.** The Quota screen ignores the
   period control; its days are 24-hour steps from the reset hour.
 - **The budget in tokens is an estimate:** Claude Code tokens up to a reading ÷
-  that reading's percentage. Opus weighs more than Sonnet, cache reads count
-  for little, and claude.ai or desktop use is in the percentage but not in the
-  tokens. The percentage is the figure to trust.
+  that reading's percentage. After a plan change it is not known whether the
+  new figure counts the whole week or only the time since the switch, so the
+  budget is the tokens from the new plan's first tick (the first reading above
+  the one before it) to its latest reading ÷ the points gained, once that is 3
+  or more; past weeks with a switch use the same rule. What is left is the
+  budget × the percentage still free, less the tokens since it was read. The
+  budget moves with the model mix (a token of a dearer model takes more of the
+  quota, cache reads count for little), and claude.ai or desktop use is in the
+  percentage but not in the tokens. The percentage is the figure to trust.
 
 ## How it is put together
 

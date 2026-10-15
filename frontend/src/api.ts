@@ -244,6 +244,9 @@ export interface Quota {
   tokens: {
     used: number; per_day_so_far: number; avg_day_past: number | null;
     budget: number | null; budget_from: string | null;
+    /** the line's estimate from tokens, one part per plan: from a known percentage (`pct` after
+     * `tokens` of the window), on that plan's budget, until `to` (null: still running) */
+    estimate: { from: string; to: string | null; pct: number; tokens: number; budget: number; plan_label: string | null }[];
     left: { tokens: number; per_day: number | null } | null;
   };
   five_hour: { used_pct: number; reset: string; at: string } | null;
