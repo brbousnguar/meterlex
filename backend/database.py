@@ -49,6 +49,11 @@ def _migrate_columns(target):
             conn.exec_driver_sql("ALTER TABLE usage_turns ADD COLUMN origin VARCHAR")
         if "branch" not in turn_cols:
             conn.exec_driver_sql("ALTER TABLE usage_turns ADD COLUMN branch VARCHAR")
+        quota_cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(quota_readings)")}
+        if quota_cols and "plan" not in quota_cols:
+            conn.exec_driver_sql("ALTER TABLE quota_readings ADD COLUMN plan VARCHAR")
+        if quota_cols and "fresh" not in quota_cols:
+            conn.exec_driver_sql("ALTER TABLE quota_readings ADD COLUMN fresh BOOLEAN NOT NULL DEFAULT 0")
         # Claude Code records HEAD outside a repository; collectors 0.2.0 sent it
         conn.exec_driver_sql("UPDATE usage_turns SET branch = NULL WHERE branch = 'HEAD'")
         # Rows ingested before ids were canonicalised: one model, one name.

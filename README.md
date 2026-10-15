@@ -189,11 +189,24 @@ It prints one line (`Opus 5.5 · Server · week 41% · 6 pts ahead · 5h 12%`),
 appends readings to `quota.jsonl` in the collector's folder, and `run` sends
 them with the turns. One machine is enough: the quota belongs to the account.
 
-- **Only higher figures are kept.** Every open Claude Code session repaints its
-  status line with the last figure it was given, so an idle session from days
-  ago still shows an old, lower one. Within a window the figure only grows, so
-  the collector keeps a reading only when it is higher (or a new window), and
-  the hub reads the highest.
+- **A lower figure counts only when it is fresh.** Every open Claude Code
+  session repaints its status line with the last figure it was given, so an
+  idle session from days ago still shows an old, lower one. The collector
+  remembers what each session painted last. A session whose own figure moved
+  has just had an answer from Anthropic, so that reading is *fresh*: the truth
+  even when it is lower. A session repainting its own figure is not news, and a
+  session seen for the first time counts only for a later window or a higher
+  figure. On the hub, fresh readings set the week's figure and the others can
+  only raise it.
+- **A plan change keeps the reset but rescales the percentage.** Going from
+  Max 5x to Max 20x took the week from 73% to 7% within the same window. Each
+  reading carries the plan Claude Code is signed in on (`oauthAccount`'s rate
+  limit tier in `~/.claude.json`), and a new plan is fresh news. The screen
+  names the plan, steps the line down where the new plan's first reading lands,
+  and only lets weeks on the current plan lend a budget or an average. Readings
+  from collectors older than 0.6.0 carry no plan:
+  `manage.py quota-plan default_claude_max_5x --before <ISO time> --apply`
+  names it for the ones before a switch.
 - **The week runs from the reset, not Monday.** The Quota screen ignores the
   period control; its days are 24-hour steps from the reset hour.
 - **The budget in tokens is an estimate:** Claude Code tokens up to a reading ÷
@@ -210,7 +223,7 @@ backend/
   main.py           FastAPI application and REST API
   ingest.py         Stores collectors' batches: one row per reply, tool attribution, pricing
   machines.py       Machine keys (stored hashed)
-  manage.py         Admin commands: machine keys, legacy dedupe
+  manage.py         Admin commands: machine keys, legacy dedupe, quota plan
   pricing.py        Price resolution: mirrored rate card → Meterlex's fallbacks → free
   models.py         SQLModel schema (UsageTurn, Machine, ModelPrice, Setting, ManualBill)
   database.py       Engine, session helpers, column migrations

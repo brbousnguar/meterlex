@@ -38,7 +38,7 @@ from pathlib import Path
 from typing import Iterator, Optional
 from urllib.parse import urlparse
 
-VERSION = "0.5.0"
+VERSION = "0.6.0"
 BATCH = 1000               # turns per POST
 SPOOL_MAX = 500_000        # unsent turns kept on disk before the oldest are dropped
 HOME = Path.home()
@@ -1141,13 +1141,27 @@ def spool_flush(cfg: dict) -> tuple[int, Optional[str]]:
 
 WEEK_S = 7 * 24 * 3600
 QUOTA_KEEP = 256 * 1024     # bytes of sent readings kept before quota.jsonl is trimmed
+SESSION_KEEP_S = 8 * 86400  # how long a session's last figure is remembered
+SAME_RESET_S = 3600         # resets_at can move by seconds between readings
 
 
 def _quota_path() -> Path:
     return config_dir() / "quota.jsonl"
 
 
-def quota_readings(data: dict, now: float) -> list:
+def claude_plan() -> Optional[str]:
+    """The subscription tier Claude Code is signed in on (e.g.
+    default_claude_max_20x), from its own config; None when unreadable."""
+    base = os.environ.get("CLAUDE_CONFIG_DIR")
+    account = _read_json((Path(base) if base else Path.home()) / ".claude.json", {})
+    account = account.get("oauthAccount") if isinstance(account, dict) else None
+    if not isinstance(account, dict):
+        return None
+    tier = account.get("userRateLimitTier") or account.get("organizationRateLimitTier")
+    return str(tier)[:64] if tier else None
+
+
+def quota_readings(data: dict, now: float, plan: Optional[str] = None) -> list:
     """The windows in one status-line payload, as readings."""
     out = []
     limits = data.get("rate_limits") if isinstance(data, dict) else None
@@ -1158,39 +1172,76 @@ def quota_readings(data: dict, now: float) -> list:
             used, resets = float(w["used_percentage"]), float(w["resets_at"])
         except (KeyError, TypeError, ValueError):
             continue
-        out.append({"window": window, "used_pct": used, "resets_at": int(resets),
-                    "ts": datetime.fromtimestamp(now, tz=timezone.utc).isoformat()})
+        r = {"window": window, "used_pct": used, "resets_at": int(resets),
+             "ts": datetime.fromtimestamp(now, tz=timezone.utc).isoformat()}
+        if plan:
+            r["plan"] = plan
+        out.append(r)
     return out
 
 
-def _newer(r: dict, kept) -> bool:
-    """Within one window the percentage only grows. Every open Claude Code
-    session repaints its status line with the last figure it was given, so an
-    idle session from days ago still shows an old, lower one: only a higher
-    figure, or a new window, is news."""
+def _news(r: dict, kept, prev) -> tuple[bool, bool]:
+    """(is it news, is it fresh). Every open Claude Code session repaints its
+    status line with the last figure it was given, so an idle session from
+    days ago still shows an old, lower one.
+
+    A session whose own figure moved (`prev` is the figure it painted last)
+    has just had an answer from Anthropic: that reading is fresh, the truth
+    even when it is lower, which is how a plan change shows. A session
+    repainting its own figure is not news. A session not seen before may be
+    an idle one, so it is news only for a later window or a higher figure, and
+    once a fresh reading is kept, only a fresh one replaces it in its window.
+    A new plan is fresh news too."""
+    if prev is not None:
+        moved = r["used_pct"] != prev[0] or abs(r["resets_at"] - prev[1]) > SAME_RESET_S
+        return moved, moved
     if not kept:
-        return True
-    pct, resets = kept
-    if abs(r["resets_at"] - resets) > 3600:
-        return r["resets_at"] > resets
-    return r["used_pct"] > pct
+        return True, False
+    pct, resets = kept[0], kept[1]
+    plan = kept[2] if len(kept) > 2 else None
+    was_fresh = bool(kept[3]) if len(kept) > 3 else False
+    if r.get("plan") and r["plan"] != plan:
+        return True, True
+    if abs(r["resets_at"] - resets) > SAME_RESET_S:
+        return r["resets_at"] > resets, False
+    return r["used_pct"] > pct and not was_fresh, False
 
 
-def record_quota(readings: list) -> int:
-    """Append the readings that are news for their window (see _newer)."""
+def record_quota(readings: list, session_id: Optional[str] = None, now: Optional[float] = None) -> int:
+    """Append the readings that are news for their window (see _news), and
+    remember what this session painted."""
+    now = time.time() if now is None else now
     last_path = config_dir() / "quota-last.json"
     last = _read_json(last_path, {})
-    fresh = [r for r in readings if _newer(r, last.get(r["window"]))]
-    if not fresh:
-        return 0
-    config_dir().mkdir(parents=True, exist_ok=True)
-    with open(_quota_path(), "a", encoding="utf-8") as fh:
-        for r in fresh:
-            fh.write(json.dumps(r) + "\n")
-    for r in fresh:
-        last[r["window"]] = [r["used_pct"], r["resets_at"]]
-    _write_json(last_path, last)
-    return len(fresh)
+    sessions = last.get("sessions") if isinstance(last.get("sessions"), dict) else {}
+    mine = sessions.get(session_id, {}) if session_id else {}
+    news = []
+    for r in readings:
+        is_news, fresh = _news(r, last.get(r["window"]), mine.get(r["window"]))
+        if is_news:
+            news.append(dict(r, fresh=True) if fresh else r)
+    seen = {r["window"]: [r["used_pct"], r["resets_at"]] for r in readings}
+    # a repaint only refreshes the session's age, and that at most hourly
+    remember = bool(session_id and seen) and (
+        any(mine.get(w) != v for w, v in seen.items()) or now - mine.get("t", 0) > 3600)
+    if remember:
+        sessions = {k: v for k, v in sessions.items()
+                    if isinstance(v, dict) and now - v.get("t", 0) < SESSION_KEEP_S}
+        sessions[session_id] = dict(mine, t=int(now), **seen)
+        last["sessions"] = sessions
+    if news:
+        config_dir().mkdir(parents=True, exist_ok=True)
+        with open(_quota_path(), "a", encoding="utf-8") as fh:
+            for r in news:
+                fh.write(json.dumps(r) + "\n")
+        for r in news:
+            # ~/.claude.json can be mid-write: a reading without a plan keeps the known one
+            known = last.get(r["window"]) or []
+            plan = r.get("plan") or (known[2] if len(known) > 2 else None)
+            last[r["window"]] = [r["used_pct"], r["resets_at"], plan, bool(r.get("fresh"))]
+    if news or remember:
+        _write_json(last_path, last)
+    return len(news)
 
 
 def status_text(data: dict, readings: list, now: float) -> str:
@@ -1222,15 +1273,17 @@ def cmd_statusline(stdin=None) -> int:
         data = json.loads((stdin or sys.stdin).read() or "{}")
     except (ValueError, OSError):
         data = {}
-    readings = quota_readings(data, now)
+    readings = quota_readings(data, now, claude_plan() if isinstance(data, dict) and data.get("rate_limits") else None)
+    session_id = data.get("session_id") if isinstance(data, dict) else None
     try:
-        record_quota(readings)
+        record_quota(readings, str(session_id) if session_id else None, now)
         # an idle session's own figure can be days old: show the newest known
         best = _read_json(config_dir() / "quota-last.json", {})
         for r in readings:
             kept = best.get(r["window"])
-            if kept and abs(kept[1] - r["resets_at"]) <= 3600:
-                r["used_pct"] = max(r["used_pct"], kept[0])
+            if kept and abs(kept[1] - r["resets_at"]) <= SAME_RESET_S:
+                fresh = len(kept) > 3 and kept[3]
+                r["used_pct"] = kept[0] if fresh else max(r["used_pct"], kept[0])
     except OSError:
         pass
     print(status_text(data if isinstance(data, dict) else {}, readings, now))

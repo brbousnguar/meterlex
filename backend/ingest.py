@@ -347,6 +347,7 @@ def recompute_costs() -> int:
 
 
 _WINDOW = re.compile(r"^[a-z0-9_]{1,40}$")
+_PLAN = re.compile(r"^[A-Za-z0-9_.:-]{1,64}$")
 MAX_QUOTA_PER_BATCH = 5000
 
 
@@ -363,6 +364,9 @@ def ingest_quota(session: Session, machine: Machine, readings: list) -> dict:
                 raise ValueError(used)
             resets = datetime.fromtimestamp(float(raw["resets_at"]), tz=timezone.utc).replace(tzinfo=None)
             ts = _ts(raw["ts"])
+            plan = raw.get("plan")
+            if plan is not None and not _PLAN.match(str(plan)):
+                raise ValueError(plan)
         except (KeyError, TypeError, ValueError, OverflowError, OSError):
             counts["rejected"] += 1
             continue
@@ -372,7 +376,8 @@ def ingest_quota(session: Session, machine: Machine, readings: list) -> dict:
         if seen is not None:
             counts["unchanged"] += 1
             continue
-        session.add(QuotaReading(window=window, used_pct=used, resets_at=resets, ts=ts, machine=machine.name))
+        session.add(QuotaReading(window=window, used_pct=used, resets_at=resets, ts=ts, machine=machine.name,
+                                 plan=str(plan) if plan else None, fresh=raw.get("fresh") is True))
         session.flush()
         counts["inserted"] += 1
     session.commit()

@@ -8,7 +8,12 @@ tokens: tokens used up to a reading ÷ that reading's percentage. It is an
 estimate — Opus and Sonnet weigh differently and cache reads count for little,
 and usage on claude.ai or the desktop app is in the percentage but not in the
 turns — so the percentage stays the figure to trust.
+
+A plan change (Max 5x to Max 20x, say) keeps the reset but rescales the
+percentage, so a figure only compares with figures read on the same plan:
+the budget and the past weeks' average use those alone.
 """
+import re
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -64,14 +69,64 @@ def _in_window(r: QuotaReading, reset: datetime) -> bool:
     return abs(r.resets_at - reset) <= SAME_RESET
 
 
-def _running_max(rs: list) -> list:
-    """The readings that raised the figure, in time order."""
-    out, top = [], -1.0
+def _line(rs: list) -> list:
+    """The readings that moved the figure, in time order. A fresh reading (a
+    session whose own figure just moved) is the truth at its time, even when
+    it is lower, as after a plan change. Any other reading may be an idle
+    session repainting an old figure, so it can only raise it, and once a
+    fresh reading has set the figure, only when it names the same plan (a
+    collector older than 0.6.0 names none)."""
+    out, top, fresh_plan = [], None, None
     for r in sorted(rs, key=lambda r: r.ts):
-        if r.used_pct > top:
+        if r.fresh:
+            fresh_plan = r.plan or ""
+        elif fresh_plan is not None and (r.plan or "") != fresh_plan:
+            continue
+        if top is None or r.used_pct > top or (r.fresh and r.used_pct != top):
             out.append(r)
             top = r.used_pct
     return out
+
+
+def plan_label(plan: Optional[str]) -> Optional[str]:
+    """default_claude_max_20x → Max 20x."""
+    if not plan:
+        return None
+    m = re.search(r"max_(\d+)x", plan)
+    if m:
+        return f"Max {m.group(1)}x"
+    for word, label in (("max", "Max"), ("team", "Team"), ("enterprise", "Enterprise"), ("pro", "Pro")):
+        if word in plan:
+            return label
+    return plan
+
+
+def _plan_of(rs: list) -> Optional[str]:
+    """The plan of the newest reading that names one."""
+    return next((r.plan for r in sorted(rs, key=lambda r: r.ts, reverse=True) if r.plan), None)
+
+
+def _plan_change(line: list) -> Optional[dict]:
+    """The last switch between two named plans along a window's line."""
+    change, prev = None, None
+    for r in line:
+        if r.plan and prev is not None and r.plan != prev.plan:
+            change = {"from": prev.plan, "to": r.plan, "from_label": plan_label(prev.plan),
+                      "to_label": plan_label(r.plan), "last_at": _iso(prev.ts), "at": _iso(r.ts)}
+        if r.plan:
+            prev = r
+    return change
+
+
+def stamp_plan(session: Session, plan: str, before: datetime, apply: bool = False) -> int:
+    """Name the plan of the readings before `before` that carry none."""
+    rows = session.exec(select(QuotaReading).where(QuotaReading.plan.is_(None), QuotaReading.ts < before)).all()
+    if apply:
+        for r in rows:
+            r.plan = plan
+            session.add(r)
+        session.commit()
+    return len(rows)
 
 
 def view(session: Session, now: datetime, tz: ZoneInfo) -> dict:
@@ -84,6 +139,7 @@ def view(session: Session, now: datetime, tz: ZoneInfo) -> dict:
         .where(UsageTurn.source == SOURCE, UsageTurn.ts >= min(oldest, now - 28 * DAY), UsageTurn.ts < now)
     ).all()
     week_readings = _readings(session, "seven_day", oldest - WEEK)
+    plan = _plan_of(week_readings)
 
     def tokens_between(a: datetime, b: datetime) -> int:
         return sum(t[1] for t in turns if a <= t[0] < b)
@@ -92,15 +148,15 @@ def view(session: Session, now: datetime, tz: ZoneInfo) -> dict:
     # Within a window the percentage only grows, but every open Claude Code
     # session reports the last figure it was given, so a stale one can arrive
     # late: the reading is the highest so far, and the line its running max.
-    current = _running_max([r for r in week_readings if _in_window(r, reset)])
-    reading = max(current, key=lambda r: (r.used_pct, r.ts)) if current else None
+    current = _line([r for r in week_readings if _in_window(r, reset)])
+    reading = current[-1] if current else None
     used_pct = reading.used_pct if reading else (0.0 if anchored else None)
     elapsed = min(1.0, max(0.0, (now - start) / WEEK))
     used_tokens = tokens_between(start, now)
 
     budget, budget_from = None, None
     for r in reversed(current):
-        if r.used_pct >= MIN_PCT_FOR_BUDGET:
+        if r.used_pct >= MIN_PCT_FOR_BUDGET and r.plan == plan:
             budget, budget_from = tokens_between(start, r.ts) / (r.used_pct / 100), "this week"
             break
 
@@ -109,26 +165,28 @@ def view(session: Session, now: datetime, tz: ZoneInfo) -> dict:
     for k in range(1, PAST_WINDOWS + 1):
         p_reset = reset - (k - 1) * WEEK - WEEK
         p_start = p_reset - WEEK
-        rs = [r for r in week_readings if _in_window(r, p_reset)]
-        final = max((r.used_pct for r in rs), default=None)
+        p_line = _line([r for r in week_readings if _in_window(r, p_reset)])
+        top = p_line[-1] if p_line else None
         tok = tokens_between(p_start, p_reset)
         p_budget = None
-        top = max(rs, key=lambda r: r.used_pct, default=None)
         if top is not None and top.used_pct >= MIN_PCT_FOR_BUDGET:
             p_budget = tokens_between(p_start, top.ts) / (top.used_pct / 100)
+        p_plan = top.plan if top is not None else None
         past.append({
             "start": _iso(p_start), "reset": _iso(p_reset),
             "start_local": _local(p_start, tz).isoformat(),
-            "tokens": tok, "final_pct": final, "budget": round(p_budget) if p_budget else None,
+            "tokens": tok, "final_pct": top.used_pct if top else None,
+            "budget": round(p_budget) if p_budget else None,
+            "plan": p_plan, "plan_label": plan_label(p_plan), "same_plan": p_plan == plan,
         })
     if budget is None:
-        known = [p["budget"] for p in past if p["budget"]][:4]
+        known = [p["budget"] for p in past if p["budget"] and p["same_plan"]][:4]
         if known:
             budget, budget_from = sum(known) / len(known), f"the last {len(known)} week{'s' if len(known) > 1 else ''}"
 
     full_past = [p for p in past if p["tokens"] > 0][:4]
     avg_day = sum(p["tokens"] for p in full_past) / (7 * len(full_past)) if full_past else None
-    finals = [p["final_pct"] for p in past[:4] if p["final_pct"] is not None]
+    finals = [p["final_pct"] for p in past[:4] if p["final_pct"] is not None and p["same_plan"]]
 
     # ── pace ────────────────────────────────────────────────────────────────
     pace = None
@@ -191,8 +249,8 @@ def view(session: Session, now: datetime, tz: ZoneInfo) -> dict:
     five = _latest(session, "five_hour")
     five_hour = None
     if five is not None and five.resets_at > now:
-        same = _running_max([r for r in _readings(session, "five_hour", now - timedelta(hours=6))
-                             if abs(r.resets_at - five.resets_at) <= SAME_RESET])
+        same = _line([r for r in _readings(session, "five_hour", now - timedelta(hours=6))
+                      if abs(r.resets_at - five.resets_at) <= SAME_RESET])
         top = same[-1] if same else five
         five_hour = {"used_pct": top.used_pct, "reset": _iso(top.resets_at), "at": _iso(top.ts)}
 
@@ -200,6 +258,9 @@ def view(session: Session, now: datetime, tz: ZoneInfo) -> dict:
         "now": _iso(now),
         "tz": str(tz),
         "anchored": anchored,
+        "plan": plan,
+        "plan_label": plan_label(plan),
+        "plan_change": _plan_change(current),
         "window": {
             "start": _iso(start), "reset": _iso(reset),
             "start_local": _local(start, tz).isoformat(), "reset_local": _local(reset, tz).isoformat(),
@@ -218,7 +279,7 @@ def view(session: Session, now: datetime, tz: ZoneInfo) -> dict:
             "left": left,
         },
         "five_hour": five_hour,
-        "history": [{"at": _iso(r.ts), "pct": r.used_pct} for r in current],
+        "history": [{"at": _iso(r.ts), "pct": r.used_pct, "plan_label": plan_label(r.plan)} for r in current],
         "days": day_pts,
         "hourly": hourly,
         "past": past,

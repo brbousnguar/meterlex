@@ -113,3 +113,57 @@ def test_a_stale_lower_figure_from_an_idle_session_does_not_pull_the_week_down(s
     v = quota.view(session, START + timedelta(days=3, hours=2), PARIS)
     assert v["used_pct"] == 45.0
     assert [h["pct"] for h in v["history"]] == [40.0, 45.0]
+
+
+# ── a plan change: same reset, a rescaled percentage (#46) ────────────────────
+
+def test_a_fresh_lower_figure_on_a_new_plan_sets_the_week_and_its_budget(session):
+    m = _machine(session)
+    prev_start = START - timedelta(days=7)
+    _turn(session, prev_start + timedelta(days=1), 500)
+    _turn(session, START + timedelta(hours=1), 730)
+    _turn(session, START + timedelta(days=4), 270)
+    five, twenty = "default_claude_max_5x", "default_claude_max_20x"
+    ingest.ingest_quota(session, m, [
+        dict(_reading(prev_start + timedelta(days=2), 100.0, reset=START), plan=five),
+        dict(_reading(START + timedelta(days=3), 73.0), plan=five),
+        dict(_reading(START + timedelta(days=4, hours=1), 5.0), plan=twenty, fresh=True),
+        _reading(START + timedelta(days=4, hours=2), 70.0),               # an idle session, old figure
+        dict(_reading(START + timedelta(days=4, hours=3), 6.0), plan=twenty, fresh=True),
+    ])
+    v = quota.view(session, START + timedelta(days=5), PARIS)
+    assert v["used_pct"] == 6.0 and v["plan"] == twenty and v["plan_label"] == "Max 20x"
+    assert [h["pct"] for h in v["history"]] == [73.0, 5.0, 6.0]
+    assert v["plan_change"]["from_label"] == "Max 5x" and v["plan_change"]["to_label"] == "Max 20x"
+    assert v["plan_change"]["at"] == "2026-10-07T10:00:00Z"
+    assert (v["tokens"]["budget"], v["tokens"]["budget_from"]) == (round(1000 / 0.06), "this week")
+    assert v["past"][0]["final_pct"] == 100.0 and v["past"][0]["plan_label"] == "Max 5x"
+    assert v["past"][0]["same_plan"] is False and v["avg_final_pct"] is None
+
+
+def test_past_weeks_on_another_plan_lend_no_budget(session):
+    m = _machine(session)
+    prev_start = START - timedelta(days=7)
+    _turn(session, prev_start + timedelta(days=1), 500)
+    ingest.ingest_quota(session, m, [
+        dict(_reading(prev_start + timedelta(days=2), 50.0, reset=START), plan="default_claude_max_5x"),
+        dict(_reading(START + timedelta(hours=1), 1.0), plan="default_claude_max_20x", fresh=True),
+    ])
+    v = quota.view(session, START + timedelta(hours=2), PARIS)
+    assert v["tokens"]["budget"] is None and v["plan_change"] is None
+
+
+def test_readings_keep_their_plan_and_freshness_and_old_ones_can_be_named(session):
+    m = _machine(session)
+    batch = [dict(_reading(START, 2.0), plan="default_claude_max_20x", fresh=True),
+             _reading(START - timedelta(days=1), 90.0, reset=START),
+             dict(_reading(START + timedelta(hours=1), 3.0), plan="max 20x; drop table")]
+    assert ingest.ingest_quota(session, m, batch) == {"inserted": 2, "unchanged": 0, "rejected": 1}
+    rows = {r.used_pct: r for r in session.exec(select(QuotaReading)).all()}
+    assert (rows[2.0].plan, rows[2.0].fresh) == ("default_claude_max_20x", True)
+    assert (rows[90.0].plan, rows[90.0].fresh) == (None, False)
+    assert quota.stamp_plan(session, "default_claude_max_5x", START) == 1          # a dry run
+    assert session.get(QuotaReading, rows[90.0].id).plan is None
+    assert quota.stamp_plan(session, "default_claude_max_5x", START, apply=True) == 1
+    assert session.get(QuotaReading, rows[90.0].id).plan == "default_claude_max_5x"
+    assert quota.plan_label("default_claude_max_5x") == "Max 5x" and quota.plan_label(None) is None

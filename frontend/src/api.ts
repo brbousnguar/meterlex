@@ -224,12 +224,19 @@ export interface QuotaDay {
 export interface QuotaPast {
   start: string; reset: string; start_local: string;
   tokens: number; final_pct: number | null; budget: number | null;
+  /** the plan its last reading was on; only same-plan weeks lend a budget or an average */
+  plan: string | null; plan_label: string | null; same_plan: boolean;
 }
 export interface Quota {
   now: string;
   tz: string;
   /** false until a first reading: the window is then just the last seven days */
   anchored: boolean;
+  /** the subscription tier of the newest reading that names one, e.g. default_claude_max_20x */
+  plan: string | null;
+  plan_label: string | null;
+  /** the last switch between two plans inside this window */
+  plan_change: { from: string; to: string; from_label: string; to_label: string; last_at: string; at: string } | null;
   window: { start: string; reset: string; start_local: string; reset_local: string; elapsed_pct: number; days_left: number | null };
   reading: { used_pct: number; at: string; machine: string } | null;
   used_pct: number | null;
@@ -240,7 +247,7 @@ export interface Quota {
     left: { tokens: number; per_day: number | null } | null;
   };
   five_hour: { used_pct: number; reset: string; at: string } | null;
-  history: { at: string; pct: number }[];
+  history: { at: string; pct: number; plan_label: string | null }[];
   days: QuotaDay[];
   /** Claude Code tokens per hour of the window, from its start (168) */
   hourly: number[];
