@@ -205,9 +205,6 @@ export default function WeekLine({ q }: { q: Quota }) {
             </g>
           )}
           <path d={used} className="ql-used" />
-          {q.history.map((h) => (
-            <rect key={h.at} x={x(Date.parse(h.at)) - 3} y={y(h.pct) - 3} width="6" height="6" className="ql-read" />
-          ))}
           <line x1={x(now)} x2={x(now)} y1={T} y2={H - B} className="ql-now" />
           {q.used_pct !== null && <rect x={x(now) - 4} y={y(q.used_pct) - 4} width="8" height="8" className="ql-dot" />}
           {reading && (

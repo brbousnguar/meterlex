@@ -660,7 +660,7 @@ a.linkout::after { content: "↗"; margin-left: auto; color: var(--accent-ink); 
 .ql-tick { fill: var(--ink-2); font-family: var(--mono); font-size: 11px; }
 .ql-pace { stroke: var(--ink-3); stroke-width: 1.5; stroke-dasharray: 5 5; }
 .ql-proj { stroke: var(--h-claude); stroke-width: 1.5; stroke-dasharray: 2 4; }
-.ql-used { fill: none; stroke: var(--h-claude); stroke-width: 2.5; }
+.ql-used { fill: none; stroke: var(--h-claude); stroke-width: 2.5; stroke-linejoin: round; }
 .ql-now { stroke: var(--ink); stroke-width: 1; }
 .ql-plan-old { fill: var(--surface-2); opacity: .55; }
 .ql-plan line { stroke: var(--ink-2); stroke-width: 2; }
@@ -671,7 +671,6 @@ a.linkout::after { content: "↗"; margin-left: auto; color: var(--accent-ink); 
 .heat-h, .heat-d { font-family: var(--mono); font-size: .62rem; color: var(--ink-2); }
 .heat-c { display: block; aspect-ratio: 1; min-height: 8px; }
 .quota-note { margin: 22px 0 0; max-width: 70ch; }
-.ql-read { fill: var(--surface); stroke: var(--h-claude); stroke-width: 2; }
 .quota-cols { display: grid; gap: 0 22px; }
 @media (min-width: 1000px) { .quota-cols { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; } }
 /* The week line reads like the bar charts: the whole plot is the hit target. */
