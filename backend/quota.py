@@ -106,16 +106,26 @@ def _plan_of(rs: list) -> Optional[str]:
     return next((r.plan for r in sorted(rs, key=lambda r: r.ts, reverse=True) if r.plan), None)
 
 
-def _plan_change(line: list) -> Optional[dict]:
-    """The last switch between two named plans along a window's line."""
+def _plan_change(session: Session, line: list) -> Optional[dict]:
+    """The last switch between two named plans along a window's line. It
+    happened after the last reading on the old plan and before the first on
+    the new one, in either window: the 5-hour readings come more often, so
+    they narrow it. The week line draws its delimiter at `last_at`."""
     change, prev = None, None
     for r in line:
         if r.plan and prev is not None and r.plan != prev.plan:
-            change = {"from": prev.plan, "to": r.plan, "from_label": plan_label(prev.plan),
-                      "to_label": plan_label(r.plan), "last_at": _iso(prev.ts), "at": _iso(r.ts)}
+            change = (prev, r)
         if r.plan:
             prev = r
-    return change
+    if change is None:
+        return None
+    old, new = change
+    last = session.exec(select(QuotaReading.ts).where(
+        QuotaReading.plan == old.plan, QuotaReading.ts < new.ts).order_by(QuotaReading.ts.desc())).first()
+    first = session.exec(select(QuotaReading.ts).where(
+        QuotaReading.plan == new.plan, QuotaReading.ts > (last or old.ts)).order_by(QuotaReading.ts)).first()
+    return {"from": old.plan, "to": new.plan, "from_label": plan_label(old.plan), "to_label": plan_label(new.plan),
+            "last_at": _iso(max(last or old.ts, old.ts)), "at": _iso(first or new.ts)}
 
 
 def stamp_plan(session: Session, plan: str, before: datetime, apply: bool = False) -> int:
@@ -260,7 +270,7 @@ def view(session: Session, now: datetime, tz: ZoneInfo) -> dict:
         "anchored": anchored,
         "plan": plan,
         "plan_label": plan_label(plan),
-        "plan_change": _plan_change(current),
+        "plan_change": _plan_change(session, current),
         "window": {
             "start": _iso(start), "reset": _iso(reset),
             "start_local": _local(start, tz).isoformat(), "reset_local": _local(reset, tz).isoformat(),
