@@ -203,17 +203,25 @@ def stamp_plan(session: Session, plan: str, before: datetime, apply: bool = Fals
     return len(rows)
 
 
-def view(session: Session, now: datetime, tz: ZoneInfo) -> dict:
+def view(session: Session, now: datetime, tz: ZoneInfo, back: int = 0) -> dict:
+    """The window `back` weeks before the current one (0: this week), read to
+    its own end. A past window is complete, so its figures are the week's
+    finals; the pace, the projection, the 5-hour window and the booked next
+    plan belong to the live week and are left out."""
     latest_week = _latest(session, "seven_day")
-    start, reset, anchored = current_window(latest_week, now)
-    oldest = start - PAST_WINDOWS * WEEK
+    cur_start, cur_reset, anchored = current_window(latest_week, now)
+    back = max(0, min(PAST_WINDOWS, back)) if anchored else 0
+    live = back == 0
+    start, reset = cur_start - back * WEEK, cur_reset - back * WEEK
+    end = min(now, reset)                   # the window's own "now"
+    oldest = cur_start - PAST_WINDOWS * WEEK
 
     turns = session.exec(
         select(UsageTurn.ts, UsageTurn.total_tokens, UsageTurn.model_id, UsageTurn.project, UsageTurn.machine)
-        .where(UsageTurn.source == SOURCE, UsageTurn.ts >= min(oldest, now - 28 * DAY), UsageTurn.ts < now)
+        .where(UsageTurn.source == SOURCE, UsageTurn.ts >= min(oldest, end - 28 * DAY), UsageTurn.ts < now)
     ).all()
     week_readings = _readings(session, "seven_day", oldest - WEEK)
-    plan = _plan_of(week_readings)
+    plan = _plan_of(week_readings)          # the plan now
 
     def tokens_between(a: datetime, b: datetime) -> int:
         return sum(t[1] for t in turns if a <= t[0] < b)
@@ -224,24 +232,27 @@ def view(session: Session, now: datetime, tz: ZoneInfo) -> dict:
     # late: the reading is the highest so far, and the line its running max.
     current = _line([r for r in week_readings if _in_window(r, reset)])
     reading = current[-1] if current else None
-    used_pct = reading.used_pct if reading else (0.0 if anchored else None)
-    elapsed = min(1.0, max(0.0, (now - start) / WEEK))
-    used_tokens = tokens_between(start, now)
+    # the plan the window in view was read on; a past week without a reading
+    # names none rather than borrowing the plan of today
+    wplan = _plan_of(current) or (plan if live else None)
+    used_pct = reading.used_pct if reading else (0.0 if live and anchored else None)
+    elapsed = min(1.0, max(0.0, (end - start) / WEEK))
+    used_tokens = tokens_between(start, end)
 
-    # each plan's part of the line has its own budget; the current plan's is the week's
+    # each plan's part of the line has its own budget; the window's plan's is the week's
     parts = _parts(current)
     bases = [_base(part, i == 0, start) for i, part in enumerate(parts)]
     budgets = [_part_budget(part, base, tokens_between) for part, base in zip(parts, bases)]
     budget, budget_from = None, None
-    if parts and budgets[-1] and _plan_of(parts[-1]) == plan:
+    if parts and budgets[-1] and _plan_of(parts[-1]) == wplan:
         budget = budgets[-1]
-        budget_from = "this week" if len(parts) == 1 \
+        budget_from = ("this week" if live else "the week's readings") if len(parts) == 1 \
             else f"the {parts[-1][-1].used_pct - bases[-1][1]:.0f} points since the switch"
 
-    # ── past windows, on the same anchor ────────────────────────────────────
+    # ── past windows, on the live window's anchor: the list to browse ───────
     past = []
     for k in range(1, PAST_WINDOWS + 1):
-        p_reset = reset - (k - 1) * WEEK - WEEK
+        p_reset = cur_reset - k * WEEK
         p_start = p_reset - WEEK
         p_line = _line([r for r in week_readings if _in_window(r, p_reset)])
         top = p_line[-1] if p_line else None
@@ -251,7 +262,7 @@ def view(session: Session, now: datetime, tz: ZoneInfo) -> dict:
             if p_parts else None
         p_plan = top.plan if top is not None else None
         past.append({
-            "start": _iso(p_start), "reset": _iso(p_reset),
+            "back": k, "start": _iso(p_start), "reset": _iso(p_reset),
             "start_local": _local(p_start, tz).isoformat(),
             "tokens": tok, "final_pct": top.used_pct if top else None,
             "budget": round(p_budget) if p_budget else None,
@@ -260,9 +271,12 @@ def view(session: Session, now: datetime, tz: ZoneInfo) -> dict:
             "switched_from_label": plan_label(_plan_of(p_parts[0])) if len(p_parts) > 1 else None,
         })
     if budget is None:
-        known = [p["budget"] for p in past if p["budget"] and p["same_plan"]][:4]
+        # the weeks before the one in view, on its plan
+        known = [p["budget"] for p in past if p["budget"] and p["back"] > back and p["plan"] == wplan][:4]
         if known:
-            budget, budget_from = sum(known) / len(known), f"the last {len(known)} week{'s' if len(known) > 1 else ''}"
+            n = len(known)
+            budget = sum(known) / n
+            budget_from = f"the last {n} week{'s' if n > 1 else ''}" if live else f"the {n} week{'s' if n > 1 else ''} before"
     if parts:
         budgets[-1] = budget
 
@@ -276,7 +290,7 @@ def view(session: Session, now: datetime, tz: ZoneInfo) -> dict:
         estimate.append({"from": _iso(base[0]), "to": _iso(to), "pct": base[1], "tokens": tokens_between(start, base[0]),
                          "budget": round(b), "plan_label": plan_label(_plan_of(part))})
 
-    full_past = [p for p in past if p["tokens"] > 0][:4]
+    full_past = [p for p in past if p["tokens"] > 0 and p["back"] > back][:4]
     avg_day = sum(p["tokens"] for p in full_past) / (7 * len(full_past)) if full_past else None
     finals = [p["final_pct"] for p in past[:4] if p["final_pct"] is not None and p["same_plan"]]
 
@@ -285,7 +299,7 @@ def view(session: Session, now: datetime, tz: ZoneInfo) -> dict:
     # start for its first plan, from the part's base after a switch, and only
     # after a day on the new plan, since a short burst projects nonsense.
     pace = None
-    if used_pct is not None and anchored:
+    if live and used_pct is not None and anchored:
         delta = used_pct - elapsed * 100
         first = len(parts) <= 1
         base = (start, 0.0) if first else bases[-1]
@@ -299,10 +313,11 @@ def view(session: Session, now: datetime, tz: ZoneInfo) -> dict:
         }
 
     left = None
-    days_left = (reset - now) / DAY if anchored else None
+    days_left = (reset - end) / DAY if anchored else None
     if budget:
-        # what the percentage leaves, less what was spent since it was read
-        remaining = max(0.0, budget * (100 - (used_pct or 0)) / 100 - tokens_between(reading.ts if reading else start, now))
+        # what the percentage leaves, less what was spent since it was read;
+        # for a past window, what the reset found unused
+        remaining = max(0.0, budget * (100 - (used_pct or 0)) / 100 - tokens_between(reading.ts if reading else start, end))
         left = {
             "tokens": round(remaining),
             "per_day": round(remaining / days_left) if days_left and days_left > 0.04 else None,
@@ -318,27 +333,27 @@ def view(session: Session, now: datetime, tz: ZoneInfo) -> dict:
                 end_reading = r.used_pct
         day_pts.append({
             "start": _iso(a), "start_local": _local(a, tz).isoformat(),
-            "tokens": tokens_between(a, min(b, now)) if a < now else 0,
-            "future": a >= now, "current": a <= now < b,
-            "end_pct": end_reading if a < now else None,
+            "tokens": tokens_between(a, min(b, end)) if a < end else 0,
+            "future": a >= end, "current": a <= end < b,
+            "end_pct": end_reading if a < end else None,
             "pace_pct": round((i + 1) / 7 * 100, 1),
         })
 
     # ── the window hour by hour, for the line's readout ─────────────────────
     hourly = [0] * (7 * 24)
     for ts, tok, *_ in turns:
-        if start <= ts < now:
+        if start <= ts < end:
             hourly[min(len(hourly) - 1, int((ts - start) / timedelta(hours=1)))] += tok
 
-    # ── when: weekday × hour over the last four weeks, local time ───────────
+    # ── when: weekday × hour over the four weeks to the window's end, local time
     grid = [[0] * 24 for _ in range(7)]
-    since = now - 28 * DAY
+    since = end - 28 * DAY
     by_project, by_machine, by_model = defaultdict(int), defaultdict(int), defaultdict(int)
     for ts, tok, model, project, machine in turns:
-        if ts >= since:
+        if since <= ts < end:
             loc = _local(ts, tz)
             grid[loc.weekday()][loc.hour] += tok
-        if start <= ts < now:
+        if start <= ts < end:
             by_project[project or "(no folder)"] += tok
             by_machine[machine] += tok
             by_model[model] += tok
@@ -346,7 +361,7 @@ def view(session: Session, now: datetime, tz: ZoneInfo) -> dict:
     def ranked(d: dict, n: int) -> list:
         return [{"key": k, "tokens": v} for k, v in sorted(d.items(), key=lambda kv: -kv[1])[:n]]
 
-    five = _latest(session, "five_hour")
+    five = _latest(session, "five_hour") if live else None
     five_hour = None
     if five is not None and five.resets_at > now:
         same = _line([r for r in _readings(session, "five_hour", now - timedelta(hours=6))
@@ -358,12 +373,12 @@ def view(session: Session, now: datetime, tz: ZoneInfo) -> dict:
         "now": _iso(now),
         "tz": str(tz),
         "anchored": anchored,
-        "plan": plan,
-        "plan_label": plan_label(plan),
+        "plan": wplan,
+        "plan_label": plan_label(wplan),
         "plan_change": _plan_change(session, current),
-        "plan_next": next_plan(session, plan, tz),
+        "plan_next": next_plan(session, plan, tz) if live else None,
         "window": {
-            "start": _iso(start), "reset": _iso(reset),
+            "back": back, "start": _iso(start), "reset": _iso(reset), "end": _iso(end),
             "start_local": _local(start, tz).isoformat(), "reset_local": _local(reset, tz).isoformat(),
             "elapsed_pct": round(elapsed * 100, 1),
             "days_left": round(days_left, 2) if days_left is not None else None,

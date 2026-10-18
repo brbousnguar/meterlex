@@ -224,7 +224,12 @@ export interface QuotaDay {
   start: string; start_local: string; tokens: number;
   future: boolean; current: boolean; end_pct: number | null; pace_pct: number;
 }
+/** How far back the Quota screen browses, as the backend's PAST_WINDOWS. */
+export const QUOTA_WEEKS_BACK = 8;
+
 export interface QuotaPast {
+  /** weeks before the live window: the index that opens it */
+  back: number;
   start: string; reset: string; start_local: string;
   tokens: number; final_pct: number | null; budget: number | null;
   /** the plan its last reading was on; only same-plan weeks lend a budget or an average */
@@ -244,7 +249,8 @@ export interface Quota {
   plan_change: { from: string; to: string; from_label: string; to_label: string; last_at: string; at: string } | null;
   /** the plan the subscription is booked to move to, until a reading names it; `at` is its day's local midnight */
   plan_next: { plan: string; plan_label: string; on: string; at: string } | null;
-  window: { start: string; reset: string; start_local: string; reset_local: string; elapsed_pct: number; days_left: number | null };
+  /** the window in view, `back` weeks before the live one (0), read to `end`: now, or its reset once passed */
+  window: { back: number; start: string; reset: string; end: string; start_local: string; reset_local: string; elapsed_pct: number; days_left: number | null };
   reading: { used_pct: number; at: string; machine: string } | null;
   used_pct: number | null;
   pace: { delta_pts: number; status: "ahead" | "behind" | "on"; projected_pct: number | null } | null;
@@ -271,7 +277,7 @@ export interface Quota {
 }
 
 export const api = {
-  quota: () => get<Quota>("/api/quota"),
+  quota: (back = 0) => get<Quota>(`/api/quota${back ? `?back=${back}` : ""}`),
   health: () => get<Health>("/api/health"),
   overview: (period: Period, ref?: string | null, machine?: string | null) =>
     get<Overview>(`/api/overview?period=${period}${ref ? `&ref=${encodeURIComponent(ref)}` : ""}` +

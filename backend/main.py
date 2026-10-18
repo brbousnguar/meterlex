@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo
-from fastapi import FastAPI, Depends, Header, HTTPException
+from fastapi import FastAPI, Depends, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Session, select, func
 
@@ -740,9 +740,10 @@ def overview(
 # ── prices ────────────────────────────────────────────────────────────────────
 
 @app.get("/api/quota")
-def api_quota(session: Session = Depends(get_session)):
-    """The Claude Max weekly window: used against elapsed, and in tokens."""
-    return quota_view.view(session, datetime.utcnow(), LOCAL_TZ)
+def api_quota(back: int = Query(0, ge=0, le=quota_view.PAST_WINDOWS), session: Session = Depends(get_session)):
+    """The Claude Max weekly window: used against elapsed, and in tokens.
+    `back` opens an earlier window, that many weeks before the current one."""
+    return quota_view.view(session, datetime.utcnow(), LOCAL_TZ, back)
 
 
 @app.get("/api/prices")

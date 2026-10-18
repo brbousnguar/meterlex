@@ -18,11 +18,13 @@ const NAME_ROOM = 58;                     // px a plan name needs before the nex
  * (the next-plan setting) is a dotted hairline ahead, and the projection stops at it. Like the bar
  * charts, the whole plot is the hit target: pointing at an hour shows a readout beside the pointer
  * (a panel above the plot on a phone), and it leaves with the pointer. ← → move an hour,
- * Shift ← → a day, Home End, Esc clears.
+ * Shift ← → a day, Home End, Esc clears. A past window is drawn the same way to its reset,
+ * with no now line and nothing projected.
  */
 export default function WeekLine({ q }: { q: Quota }) {
   const start = Date.parse(q.window.start);
-  const now = Date.parse(q.now);
+  const now = Date.parse(q.window.end);               // a past window ends at its reset
+  const complete = now >= Date.parse(q.window.reset);  // then there is no "now" to draw
   const nowH = Math.min(HOURS - 1, Math.max(0, Math.floor((now - start) / HOUR)));
   const [picked, setPicked] = useState<number | null>(null);
   const [pointerY, setPointerY] = useState<number | null>(null);
@@ -183,7 +185,7 @@ export default function WeekLine({ q }: { q: Quota }) {
             <div className="ro-line">
               {known ? <>last read {readAt}{hourPlan ? ` on ${hourPlan}` : ""}</>
                 : estPct !== null ? <>estimated from tokens{hourPlan ? ` on ${hourPlan}` : ""}</>
-                : <>no reading yet{hourPlan ? ` on ${hourPlan}` : ""}</>}
+                : <>no reading {complete ? "that week" : "yet"}{hourPlan ? ` on ${hourPlan}` : ""}</>}
               {" · "}even pace <b>{pace.toFixed(0)}%</b>
             </div>
           </>
@@ -215,7 +217,7 @@ export default function WeekLine({ q }: { q: Quota }) {
            onPointerMove={pickAt} onPointerDown={pickAt} onPointerLeave={leave}
            onFocus={() => setReading(true)} onBlur={() => leave()} onKeyDown={onKey}>
         <svg className="quota-line" viewBox={`0 0 ${W} ${H}`} role="img"
-             aria-label={`Quota used over the week: ${q.used_pct?.toFixed(0)}% now, ${q.window.elapsed_pct.toFixed(0)}% of the week gone`}>
+             aria-label={`Quota used over the week: ${q.used_pct?.toFixed(0)}% ${complete ? "at the reset" : "now"}, ${q.window.elapsed_pct.toFixed(0)}% of the week gone`}>
           {ticks.map((v) => (
             <g key={v}>
               <line x1={L} x2={W - R} y1={y(v)} y2={y(v)} className={v === 100 ? "ql-limit" : "ql-grid"} />
@@ -239,7 +241,7 @@ export default function WeekLine({ q }: { q: Quota }) {
           {cut !== null && <line x1={x(cut)} x2={x(cut)} y1={T} y2={H - B} className="ql-plan-cut" />}
           {nextIn !== null && <line x1={x(nextIn)} x2={x(nextIn)} y1={T} y2={H - B} className="ql-plan-next" />}
           <path d={used} className="ql-used" />
-          <line x1={x(now)} x2={x(now)} y1={T} y2={H - B} className="ql-now" />
+          {!complete && <line x1={x(now)} x2={x(now)} y1={T} y2={H - B} className="ql-now" />}
           {q.used_pct !== null && <rect x={x(now) - 4} y={y(q.used_pct) - 4} width="8" height="8" className="ql-dot" />}
           {reading && (
             <g className="ql-pick">

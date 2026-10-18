@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type Quota as QuotaData } from "../api";
 import Bars, { type BarPoint } from "../components/Bars";
 import { RankRows } from "../components/charts";
@@ -27,24 +27,46 @@ const left = (days: number) => {
   return h >= 24 ? `${Math.floor(h / 24)}d ${h % 24}h` : `${h}h`;
 };
 
-export default function Quota() {
+/** The window read, for the header's week label. */
+export type QuotaWeek = { back: number; start: string; reset: string; tz: string };
+
+/** `back` is the week in view, as weeks before the live one: the header's steppers own it
+ *  and the Past weeks rows set it. Each window read is reported up for the header's label. */
+export default function Quota({ back, onBack, onWeek }: {
+  back: number; onBack: (back: number) => void; onWeek: (w: QuotaWeek) => void;
+}) {
   const [q, setQ] = useState<QuotaData | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const seq = useRef(0);        // a slow answer for an earlier week must not land on a later one
   const load = useCallback(() => {
-    api.quota().then((d) => { setQ(d); setError(null); }).catch((e) => setError(String(e.message ?? e)));
-  }, []);
+    const n = ++seq.current;
+    api.quota(back)
+      .then((d) => {
+        if (n !== seq.current) return;
+        setQ(d); setError(null);
+        onWeek({ back: d.window.back, start: d.window.start, reset: d.window.reset, tz: d.tz });
+      })
+      .catch((e) => { if (n === seq.current) setError(String(e.message ?? e)); });
+  }, [back, onWeek]);
   useEffect(() => { load(); const t = setInterval(load, 60_000); return () => clearInterval(t); }, [load]);
 
   if (error) return <p className="err">The hub did not answer ({error}). Retrying every minute.</p>;
   if (!q) return <p className="empty">Reading the quota…</p>;
-  return <QuotaView q={q} />;
+  // the page keeps the week it has while the next one loads, dimmed so it never reads as the new one
+  return (
+    <div className="quota" data-stale={q.window.back !== back ? "" : undefined}>
+      <QuotaView q={q} onBack={onBack} />
+    </div>
+  );
 }
 
-function QuotaView({ q }: { q: QuotaData }) {
+function QuotaView({ q, onBack }: { q: QuotaData; onBack: (back: number) => void }) {
   const clock = useClock(q.tz);
   const used = q.used_pct;
   const t = q.tokens;
   const p = q.pace;
+  const live = q.window.back === 0;
+  const week = live ? "this week" : "that week";
   const lastDay = q.window.days_left !== null && q.window.days_left < 1;
   const tone = p?.status === "ahead" ? "over" : p?.status === "behind" ? "under" : undefined;
 
@@ -63,15 +85,18 @@ function QuotaView({ q }: { q: QuotaData }) {
     <>
       <section className="reading">
         <div className="reading-label">
-          {q.anchored
-            ? <>Claude {q.plan_label ?? "Max"}, this week · resets {clock.when(q.window.reset)}{q.window.days_left !== null && <> · {left(q.window.days_left)} left</>}</>
-            : <>No quota reading yet: the last seven days, in tokens only</>}
+          {!q.anchored ? <>No quota reading yet: the last seven days, in tokens only</>
+            : live ? <>Claude {q.plan_label ?? "Max"}, this week · resets {clock.when(q.window.reset)}{q.window.days_left !== null && <> · {left(q.window.days_left)} left</>}</>
+            : <>Claude {q.plan_label ?? "Max"}, week of {clock.dayDate(q.window.start)} · reset {clock.when(q.window.reset)}</>}
         </div>
         <div className="quota-figure">
           <span className="quota-pct">{used === null ? "—" : `${used.toFixed(0)}%`}</span>
-          <span className="quota-of">of the week used · {q.window.elapsed_pct.toFixed(0)}% of the week gone</span>
+          <span className="quota-of">
+            {live ? <>of the week used · {q.window.elapsed_pct.toFixed(0)}% of the week gone</>
+              : used === null ? <>no quota reading that week</> : <>of the week used by the reset</>}
+          </span>
         </div>
-        <Meter used={used} elapsed={q.window.elapsed_pct} projected={p?.projected_pct ?? null} anchored={q.anchored} />
+        <Meter used={used} elapsed={q.window.elapsed_pct} projected={p?.projected_pct ?? null} anchored={q.anchored} live={live} />
         <div className="reading-meta">
           {p && (
             <span className={`pace-chip${tone ? ` ${tone}` : ""}`}>
@@ -85,7 +110,7 @@ function QuotaView({ q }: { q: QuotaData }) {
             <span className="rank-sub">5-hour window {q.five_hour.used_pct.toFixed(0)}%, resets {clock.when(q.five_hour.reset).split(", ").pop()}</span>
           )}
           {q.reading && (
-            <span className="rank-sub">read {clock.when(q.reading.at)} on <span className="mono">{q.reading.machine}</span></span>
+            <span className="rank-sub">{live ? "read" : "last read"} {clock.when(q.reading.at)} on <span className="mono">{q.reading.machine}</span></span>
           )}
           {q.plan_change && (
             <span className="rank-sub">{q.plan_change.from_label} → {q.plan_change.to_label} after {clock.when(q.plan_change.last_at)}</span>
@@ -101,7 +126,7 @@ function QuotaView({ q }: { q: QuotaData }) {
       <section className="section bare">
         <div className="rail lift">
           <div className="stat">
-            <div className="stat-label">Used this week</div>
+            <div className="stat-label">Used {week}</div>
             <div className="stat-value">{fmtTok(t.used)}</div>
             <div className="stat-sub">tokens through Claude Code</div>
           </div>
@@ -110,10 +135,17 @@ function QuotaView({ q }: { q: QuotaData }) {
             <div className="stat-value">{t.budget ? `≈ ${fmtTok(t.budget)}` : "—"}</div>
             <div className="stat-sub">
               {t.budget ? `100%${q.plan_label ? ` of ${q.plan_label}` : ""}, estimated from ${t.budget_from}`
-                : q.plan_change ? `needs 3 points gained on ${q.plan_change.to_label}` : "needs a reading of 3% or more"}
+                : q.plan_change ? `${live ? "needs" : "needed"} 3 points gained on ${q.plan_change.to_label}`
+                : `${live ? "needs" : "needed"} a reading of 3% or more`}
             </div>
           </div>
-          {lastDay ? (
+          {!live ? (
+            <div className="stat">
+              <div className="stat-label">Unused at the reset</div>
+              <div className="stat-value">{t.left ? fmtTok(t.left.tokens) : "—"}</div>
+              <div className="stat-sub">{t.left ? "of the budget, by the last reading" : "no budget that week"}</div>
+            </div>
+          ) : lastDay ? (
             <div className="stat">
               <div className="stat-label">Left before the reset</div>
               <div className="stat-value">{t.left ? fmtTok(t.left.tokens) : "—"}</div>
@@ -132,7 +164,7 @@ function QuotaView({ q }: { q: QuotaData }) {
             <div className="stat-label">Per day</div>
             <div className="stat-value">{fmtTok(t.per_day_so_far)}</div>
             <div className="stat-sub">
-              {t.avg_day_past ? `this week · past weeks ${fmtTok(t.avg_day_past)}` : "this week so far"}
+              {t.avg_day_past ? `${week} · ${live ? "past weeks" : "the weeks before"} ${fmtTok(t.avg_day_past)}` : live ? "this week so far" : "that week"}
             </div>
           </div>
         </div>
@@ -157,7 +189,7 @@ function QuotaView({ q }: { q: QuotaData }) {
       <section className="section">
         <div className="section-head">
           <h2 className="section-title">When you use it</h2>
-          <div className="section-note">tokens by weekday and hour, last four weeks</div>
+          <div className="section-note">tokens by weekday and hour, {live ? "last four weeks" : `the four weeks to ${clock.date(q.window.reset)}`}</div>
         </div>
         <Heat hours={q.hours} />
       </section>
@@ -175,6 +207,8 @@ function QuotaView({ q }: { q: QuotaData }) {
             <RankRows rows={q.past.filter((w) => w.tokens > 0 || w.final_pct !== null).map((w) => ({
               key: w.start,
               name: <span>{`from ${clock.date(w.start)}`}</span>,
+              current: w.back === q.window.back,
+              onClick: () => onBack(w.back),
               value: fmtTok(w.tokens),
               sub: w.final_pct !== null
                 ? `ended at ${w.final_pct.toFixed(0)}%${w.switched_from_label ? ` · ${w.switched_from_label} → ${w.plan_label}`
@@ -186,7 +220,7 @@ function QuotaView({ q }: { q: QuotaData }) {
             }))} />
           </section>
           <section className="section">
-            <div className="section-head"><h2 className="section-title">Models this week</h2></div>
+            <div className="section-head"><h2 className="section-title">Models {week}</h2></div>
             <RankRows rows={q.by_model.filter((m) => m.tokens > 0).map((m) => ({
               key: m.key, name: <span className="mono">{m.key}</span>, value: fmtTok(m.tokens),
               share: pct(m.tokens, q.by_model[0]?.tokens ?? 1), fill: "var(--bar)",
@@ -195,14 +229,14 @@ function QuotaView({ q }: { q: QuotaData }) {
         </div>
         <div>
           <section className="section">
-            <div className="section-head"><h2 className="section-title">Folders this week</h2></div>
+            <div className="section-head"><h2 className="section-title">Folders {week}</h2></div>
             <RankRows rows={q.by_project.map((f) => ({
               key: f.key, name: <span className="mono" title={f.key}>{folderLabel(f.key)}</span>,
               value: fmtTok(f.tokens), share: pct(f.tokens, q.by_project[0]?.tokens ?? 1), fill: CLAUDE.fill,
             }))} />
           </section>
           <section className="section">
-            <div className="section-head"><h2 className="section-title">Machines this week</h2></div>
+            <div className="section-head"><h2 className="section-title">Machines {week}</h2></div>
             <RankRows rows={q.by_machine.map((m) => ({
               key: m.key, name: <span className="mono">{m.key}</span>, value: fmtTok(m.tokens),
               sub: `${pct(m.tokens, t.used).toFixed(0)}% of the week's tokens`,
@@ -225,7 +259,7 @@ function QuotaView({ q }: { q: QuotaData }) {
 }
 
 /** One track for the week: the fill is what is used, the tick is where the week is. */
-function Meter({ used, elapsed, projected, anchored }: { used: number | null; elapsed: number; projected: number | null; anchored: boolean }) {
+function Meter({ used, elapsed, projected, anchored, live }: { used: number | null; elapsed: number; projected: number | null; anchored: boolean; live: boolean }) {
   const u = Math.min(100, used ?? 0);
   const ahead = used !== null && used > elapsed;
   return (
@@ -236,7 +270,7 @@ function Meter({ used, elapsed, projected, anchored }: { used: number | null; el
       {projected !== null && projected > u && (
         <i className="quota-proj" style={{ left: `${u}%`, width: `${Math.min(100, projected) - u}%` }} />
       )}
-      {anchored && <i className="quota-now" style={{ left: `${elapsed}%` }}><b>now</b></i>}
+      {anchored && live && <i className="quota-now" style={{ left: `${elapsed}%` }}><b>now</b></i>}
     </div>
   );
 }

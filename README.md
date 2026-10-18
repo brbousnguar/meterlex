@@ -216,8 +216,15 @@ them with the turns. One machine is enough: the quota belongs to the account.
   from collectors older than 0.6.0 carry no plan:
   `manage.py quota-plan default_claude_max_5x --before <ISO time> --apply`
   names it for the ones before a switch.
-- **The week runs from the reset, not Monday.** The Quota screen ignores the
-  period control; its days are 24-hour steps from the reset hour.
+- **The week runs from the reset, not Monday.** The Quota screen has its own
+  week control in place of the period control; its days are 24-hour steps
+  from the reset hour.
+- **Past weeks open.** The header's `‹` `›` step back through the last eight
+  windows, a row under Past weeks opens its week, and `←` `→` do the same. A
+  past window is read to its reset: its line with its plan marks, its days,
+  its budget and what the reset found unused, its folders, models and
+  machines, and the four weeks of hours before its reset. The pace, the
+  projection, the 5-hour window and a booked plan belong to the live week.
 - **The budget in tokens is an estimate:** Claude Code tokens up to a reading ÷
   that reading's percentage. After a plan change it is not known whether the
   new figure counts the whole week or only the time since the switch, so the
@@ -328,7 +335,7 @@ paths.
 | `GET` | `/api/machines` | Each machine: label policy, last report, collector version, turns and tokens |
 | `GET` | `/api/config` | What the UI needs about this deployment: the rate card's address and the period time zone |
 | `GET` | `/api/overview` | Everything one screen needs for a period (`?period=weekly\|monthly\|yearly`, `?ref=`, `?machine=`, `?source=`): totals with the token split, the same-length period before, by machine, harness, model, project (with its top branches) and origin, and a bucketed series with the empty buckets kept |
-| `GET` | `/api/quota` | The Claude Max week: window, used % against elapsed %, pace and projection, tokens, the estimated budget and what is left, per-day bars, tokens per hour of the window, past weeks, weekday × hour, top models, folders and machines |
+| `GET` | `/api/quota` | The Claude Max week: window, used % against elapsed %, pace and projection, tokens, the estimated budget and what is left, per-day bars, tokens per hour of the window, past weeks, weekday × hour, top models, folders and machines. `?back=N` (0–8) reads the window N weeks earlier to its reset, without pace, projection, 5-hour window or booked plan |
 | `GET` | `/api/summary` | Per-tool cost summary with subscription comparison (`?machine=` filters) |
 | `GET` | `/api/projects/mine` | The project labels stored for the calling machine (collector key) |
 | `POST` | `/api/projects/rename` | Move the calling machine's rows from a stored label to its repository (`{"renames": {old: new}}`) |
