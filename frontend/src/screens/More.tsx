@@ -107,6 +107,21 @@ export default function More({ onReload }: { onReload: () => void }) {
                      value={form.fx_rate ?? ""}
                      onChange={(e) => setForm((f) => ({ ...f, fx_rate: parseFloat(e.target.value) || 0 }))} />
             </div>
+            <div className="field">
+              <label htmlFor="plan_next">
+                Next Claude plan <span className="hint">· as booked with Anthropic; the Quota screen marks the switch ahead of the first reading on it</span>
+              </label>
+              <div className="field-row">
+                <select id="plan_next" value={form.plan_next ?? ""}
+                        onChange={(e) => setForm((f) => ({ ...f, plan_next: e.target.value }))}>
+                  <option value="">none booked</option>
+                  <option value="default_claude_max_5x">Max 5x</option>
+                  <option value="default_claude_max_20x">Max 20x</option>
+                </select>
+                <input id="plan_next_on" type="date" aria-label="from the day" value={form.plan_next_on ?? ""}
+                       onChange={(e) => setForm((f) => ({ ...f, plan_next_on: e.target.value }))} />
+              </div>
+            </div>
             <div className="actions">
               <button className="linkout" onClick={save} disabled={busy}>
                 <b>Save</b>

@@ -7,6 +7,7 @@ Ports: API 8692, UI 5180 (both bound to 127.0.0.1; reach the UI over Tailscale).
 import asyncio
 import logging
 import os
+import re
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -48,8 +49,13 @@ DEFAULT_SETTINGS = {
     # Hermes Agent calls each provider with an API key and pays per call (the
     # NVIDIA endpoint it runs on is free): there is no plan to compare with.
     "sub_hermes_eur": "0.00",
+    # The plan the subscription is booked to move to, and the day (YYYY-MM-DD):
+    # the Quota screen marks the switch ahead of the first reading on it.
+    "plan_next": "",
+    "plan_next_on": "",
 }
 SETTING_KEYS = set(DEFAULT_SETTINGS)
+PLAN_KEYS = {"plan_next", "plan_next_on"}
 
 
 @asynccontextmanager
@@ -772,18 +778,30 @@ async def mirror_pull_prices(session: Session = Depends(get_session)):
 @app.get("/api/settings")
 def get_settings(session: Session = Depends(get_session)):
     out = {"fx_rate": pricing.get_fx_rate(session)}
-    for key in sorted(SETTING_KEYS - {"fx_rate"}):
+    for key in sorted(SETTING_KEYS - {"fx_rate"} - PLAN_KEYS):
         out[key] = pricing.get_sub_eur(session, key[len("sub_"):-len("_eur")])
+    for key in sorted(PLAN_KEYS):
+        row = session.get(Setting, key)
+        out[key] = row.value if row else ""
     return out
 
 
 @app.patch("/api/settings")
 def update_settings(payload: dict, session: Session = Depends(get_session)):
     for k, v in payload.items():
-        if k in SETTING_KEYS:
-            row = session.get(Setting, k) or Setting(key=k)
-            row.value = str(v)
-            session.add(row)
+        if k not in SETTING_KEYS:
+            continue
+        v = str(v).strip()
+        if k == "plan_next" and v and not re.fullmatch(r"[a-z0-9_]{1,64}", v):
+            raise HTTPException(400, "plan_next must be a plan id such as default_claude_max_5x, or empty")
+        if k == "plan_next_on" and v:
+            try:
+                datetime.strptime(v, "%Y-%m-%d")
+            except ValueError:
+                raise HTTPException(400, "plan_next_on must be a day as YYYY-MM-DD, or empty")
+        row = session.get(Setting, k) or Setting(key=k)
+        row.value = v
+        session.add(row)
     session.commit()
     return get_settings(session)
 

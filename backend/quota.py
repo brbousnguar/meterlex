@@ -24,7 +24,7 @@ from zoneinfo import ZoneInfo
 
 from sqlmodel import Session, select
 
-from models import QuotaReading, UsageTurn
+from models import QuotaReading, Setting, UsageTurn
 
 WEEK = timedelta(days=7)
 DAY = timedelta(days=1)
@@ -176,6 +176,22 @@ def _plan_change(session: Session, line: list) -> Optional[dict]:
             "last_at": _iso(max(last or old.ts, old.ts)), "at": _iso(first or new.ts)}
 
 
+def next_plan(session: Session, plan: Optional[str], tz: ZoneInfo) -> Optional[dict]:
+    """The plan the subscription is booked to move to, from the settings
+    (`plan_next`, `plan_next_on` as YYYY-MM-DD). The day is the user's own, so
+    the switch is marked at its local midnight. Shown until a reading names
+    that plan: from then on the readings tell the story."""
+    nxt, on = session.get(Setting, "plan_next"), session.get(Setting, "plan_next_on")
+    if not (nxt and nxt.value and on and on.value) or nxt.value == plan:
+        return None
+    try:
+        day = datetime.strptime(on.value, "%Y-%m-%d")
+    except ValueError:
+        return None
+    at = day.replace(tzinfo=tz).astimezone(timezone.utc).replace(tzinfo=None)
+    return {"plan": nxt.value, "plan_label": plan_label(nxt.value), "on": on.value, "at": _iso(at)}
+
+
 def stamp_plan(session: Session, plan: str, before: datetime, apply: bool = False) -> int:
     """Name the plan of the readings before `before` that carry none."""
     rows = session.exec(select(QuotaReading).where(QuotaReading.plan.is_(None), QuotaReading.ts < before)).all()
@@ -240,6 +256,8 @@ def view(session: Session, now: datetime, tz: ZoneInfo) -> dict:
             "tokens": tok, "final_pct": top.used_pct if top else None,
             "budget": round(p_budget) if p_budget else None,
             "plan": p_plan, "plan_label": plan_label(p_plan), "same_plan": p_plan == plan,
+            # a week with a switch names the plan it started on too
+            "switched_from_label": plan_label(_plan_of(p_parts[0])) if len(p_parts) > 1 else None,
         })
     if budget is None:
         known = [p["budget"] for p in past if p["budget"] and p["same_plan"]][:4]
@@ -263,10 +281,17 @@ def view(session: Session, now: datetime, tz: ZoneInfo) -> dict:
     finals = [p["final_pct"] for p in past[:4] if p["final_pct"] is not None and p["same_plan"]]
 
     # ── pace ────────────────────────────────────────────────────────────────
+    # "At this rate" runs at the current plan's own rate: from the window's
+    # start for its first plan, from the part's base after a switch, and only
+    # after a day on the new plan, since a short burst projects nonsense.
     pace = None
     if used_pct is not None and anchored:
         delta = used_pct - elapsed * 100
-        projected = used_pct / elapsed if elapsed >= 0.04 else None
+        first = len(parts) <= 1
+        base = (start, 0.0) if first else bases[-1]
+        projected = None
+        if base is not None and now - base[0] >= (0.04 * WEEK if first else DAY):
+            projected = used_pct + (used_pct - base[1]) * ((reset - now) / (now - base[0]))
         pace = {
             "delta_pts": round(delta, 1),
             "status": "ahead" if delta > PACE_BAND else "behind" if delta < -PACE_BAND else "on",
@@ -336,6 +361,7 @@ def view(session: Session, now: datetime, tz: ZoneInfo) -> dict:
         "plan": plan,
         "plan_label": plan_label(plan),
         "plan_change": _plan_change(session, current),
+        "plan_next": next_plan(session, plan, tz),
         "window": {
             "start": _iso(start), "reset": _iso(reset),
             "start_local": _local(start, tz).isoformat(), "reset_local": _local(reset, tz).isoformat(),

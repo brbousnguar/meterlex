@@ -109,6 +109,9 @@ export interface Settings {
   sub_antigravity_eur: number;
   sub_ollama_eur: number;
   sub_copilot_eur: number;
+  /** the plan the subscription is booked to move to (a plan id, or ""), and the day (YYYY-MM-DD, or "") */
+  plan_next: string;
+  plan_next_on: string;
 }
 
 export interface ManualBill {
@@ -226,6 +229,8 @@ export interface QuotaPast {
   tokens: number; final_pct: number | null; budget: number | null;
   /** the plan its last reading was on; only same-plan weeks lend a budget or an average */
   plan: string | null; plan_label: string | null; same_plan: boolean;
+  /** the plan a week with a switch started on */
+  switched_from_label: string | null;
 }
 export interface Quota {
   now: string;
@@ -237,6 +242,8 @@ export interface Quota {
   plan_label: string | null;
   /** the last switch between two plans inside this window */
   plan_change: { from: string; to: string; from_label: string; to_label: string; last_at: string; at: string } | null;
+  /** the plan the subscription is booked to move to, until a reading names it; `at` is its day's local midnight */
+  plan_next: { plan: string; plan_label: string; on: string; at: string } | null;
   window: { start: string; reset: string; start_local: string; reset_local: string; elapsed_pct: number; days_left: number | null };
   reading: { used_pct: number; at: string; machine: string } | null;
   used_pct: number | null;
