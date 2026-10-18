@@ -225,20 +225,24 @@ them with the turns. One machine is enough: the quota belongs to the account.
   its budget and what the reset found unused, its folders, models and
   machines, and the four weeks of hours before its reset. The pace, the
   projection, the 5-hour window and a booked plan belong to the live week.
-- **The 5-hour window has its own section.** Claude meters a second figure,
+- **The 5-hour window is the other view.** Claude meters a second figure,
   five hours from the first message, and it is the one that runs out
-  mid-session. The open window gets the week's treatment at a smaller scale:
-  its figure against how much of the window is gone, a meter with the now
-  tick, the pace chip, "at this rate, 100% at hh:mm, N before the reset" or
-  "N% by the reset" (after a quarter of an hour, and not once it is capped),
-  when it was capped, the tokens since it opened with the estimated budget
-  and what is left, and a line against an even five hours whose readout reads
-  any ten minutes. The last six windows are listed under it, the open one in
-  the accent, each with its final figure, its tokens and when it was capped;
-  between windows the section says when the last one ended and at what.
-  Readings are grouped by reset (a reset can move by seconds), the running
-  maximum of each group is its line, and the budget is the tokens from the
-  window's start, so a window with little use has no budget yet.
+  mid-session. The header's **Week · 5 hours** switch (where the other
+  screens have their period control; the choice is remembered) shows one or
+  the other. In 5 hours the open window is the page: its figure against how
+  much of the window is gone, the meter with the now tick, the pace chip,
+  "at this rate, 100% at hh:mm, N before the reset" or "N% by the reset"
+  (after a quarter of an hour, and not once it is capped), when it was
+  capped, the tokens since it opened with the estimated budget and what is
+  left, a line against an even five hours whose readout reads any ten
+  minutes, and the last six windows, the open one in the accent, each with
+  its final figure, its tokens and when it was capped. Between windows the
+  page says when the last one ended and at what. The window is live only:
+  picking 5 hours returns to the live week, and the steppers and `←` `→`
+  belong to Week. Readings are grouped by reset (a reset can move by
+  seconds), the running maximum of each group is its line, and the budget is
+  the tokens from the window's start, so a window with little use has no
+  budget yet.
 - **The budget in tokens is an estimate:** Claude Code tokens up to a reading ÷
   that reading's percentage. After a plan change it is not known whether the
   new figure counts the whole week or only the time since the switch, so the

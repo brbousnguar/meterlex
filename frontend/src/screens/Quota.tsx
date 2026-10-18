@@ -28,13 +28,15 @@ const left = (days: number) => {
   return h >= 24 ? `${Math.floor(h / 24)}d ${h % 24}h` : `${h}h`;
 };
 
-/** The window read, for the header's week label. */
-export type QuotaWeek = { back: number; start: string; reset: string; tz: string };
+/** The two windows Claude meters, one at a time behind the header's switch. */
+export type QuotaMode = "week" | "five";
+/** The window read, for the header's label: the week, and the open 5-hour window if there is one. */
+export type QuotaWeek = { back: number; start: string; reset: string; tz: string; five: { start: string; reset: string } | null };
 
 /** `back` is the week in view, as weeks before the live one: the header's steppers own it
  *  and the Past weeks rows set it. Each window read is reported up for the header's label. */
-export default function Quota({ back, onBack, onWeek }: {
-  back: number; onBack: (back: number) => void; onWeek: (w: QuotaWeek) => void;
+export default function Quota({ back, mode, onBack, onWeek }: {
+  back: number; mode: QuotaMode; onBack: (back: number) => void; onWeek: (w: QuotaWeek) => void;
 }) {
   const [q, setQ] = useState<QuotaData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -45,7 +47,8 @@ export default function Quota({ back, onBack, onWeek }: {
       .then((d) => {
         if (n !== seq.current) return;
         setQ(d); setError(null);
-        onWeek({ back: d.window.back, start: d.window.start, reset: d.window.reset, tz: d.tz });
+        onWeek({ back: d.window.back, start: d.window.start, reset: d.window.reset, tz: d.tz,
+                 five: d.five_hour?.open ? { start: d.five_hour.open.start, reset: d.five_hour.open.reset } : null });
       })
       .catch((e) => { if (n === seq.current) setError(String(e.message ?? e)); });
   }, [back, onWeek]);
@@ -56,12 +59,17 @@ export default function Quota({ back, onBack, onWeek }: {
   // the page keeps the week it has while the next one loads, dimmed so it never reads as the new one
   return (
     <div className="quota" data-stale={q.window.back !== back ? "" : undefined}>
-      <QuotaView q={q} onBack={onBack} />
+      <QuotaView q={q} mode={mode} onBack={onBack} />
     </div>
   );
 }
 
-function QuotaView({ q, onBack }: { q: QuotaData; onBack: (back: number) => void }) {
+function QuotaView({ q, mode, onBack }: { q: QuotaData; mode: QuotaMode; onBack: (back: number) => void }) {
+  return mode === "five" ? <FiveView q={q} /> : <WeekView q={q} onBack={onBack} />;
+}
+
+/** The week: the figure Claude meters over seven days from the reset, and what it is made of. */
+function WeekView({ q, onBack }: { q: QuotaData; onBack: (back: number) => void }) {
   const clock = useClock(q.tz);
   const used = q.used_pct;
   const t = q.tokens;
@@ -168,8 +176,6 @@ function QuotaView({ q, onBack }: { q: QuotaData; onBack: (back: number) => void
         </div>
       </section>
 
-      {live && q.five_hour && <FiveHour f={q.five_hour} now={q.now} tz={q.tz} />}
-
       <section className="section">
         <div className="section-head">
           <h2 className="section-title">The week against its pace</h2>
@@ -260,41 +266,51 @@ function QuotaView({ q, onBack }: { q: QuotaData; onBack: (back: number) => void
 
 const minutes = (m: number) => m >= 60 ? `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}` : `${m} min`;
 
-/** The 5-hour window: the other figure Claude meters, the one that runs out mid-session. It opens
- *  with the first message and resets five hours later. The open one gets the week's treatment
- *  (figure, meter, pace, line); the last windows are listed under it, the open one in the accent. */
-function FiveHour({ f, now, tz }: { f: NonNullable<QuotaData["five_hour"]>; now: string; tz: string }) {
-  const clock = useClock(tz);
-  const hhmm = (iso: string) => new Date(iso).toLocaleTimeString("en-GB", { timeZone: tz, hour: "2-digit", minute: "2-digit" });
+/** The 5-hour window, the other figure Claude meters: it opens with the first message, resets five
+ *  hours later, and is the one that runs out mid-session. Behind the header's switch it is the page:
+ *  the open window with the week's treatment (figure, meter, pace, line), then the last windows,
+ *  the open one in the accent. It is live only; a past week in hand has no window to show. */
+function FiveView({ q }: { q: QuotaData }) {
+  const clock = useClock(q.tz);
+  const hhmm = (iso: string) => new Date(iso).toLocaleTimeString("en-GB", { timeZone: q.tz, hour: "2-digit", minute: "2-digit" });
+  const f = q.window.back === 0 ? q.five_hour : null;
+  if (!f) return <p className="empty">{q.window.back === 0 ? "No 5-hour reading yet: Claude Code's status line sends one with the first message." : "Reading the window…"}</p>;
   const o = f.open;
   const last = f.windows[0];
   return (
-    <section className="section five-hour">
-      <div className="section-head">
-        <h2 className="section-title">The 5-hour window</h2>
-        <div className="section-note">{o ? `resets ${hhmm(o.reset)} · ${minutes(o.minutes_left)} left` : "none open"}</div>
-      </div>
-      {o ? <OpenWindow o={o} now={now} tz={tz} hhmm={hhmm} /> : last ? (
-        <p className="rank-sub five-idle">
-          No window open: the next one starts with the first message. The last ended {clock.when(last.reset)} at {last.final_pct.toFixed(0)}%
-          {last.capped_at ? `, capped at ${hhmm(last.capped_at)}` : ""}.
-        </p>
-      ) : null}
-      <div className="section-head five-sub">
-        <h3 className="section-title small">The last windows</h3>
-        <div className="section-note">five hours from the first message</div>
-      </div>
-      <RankRows rows={f.windows.map((w) => ({
-        key: w.reset,
-        name: <span className="mono">{clock.day(w.start)} {hhmm(w.start)} → {hhmm(w.reset)}</span>,
-        current: w.current,
-        value: `${w.final_pct.toFixed(0)}%`,
-        sub: w.current ? `${fmtTok(w.tokens)} tokens so far`
-          : `${fmtTok(w.tokens)} tokens${w.capped_at ? `, capped at ${hhmm(w.capped_at)}` : ""}`,
-        share: w.final_pct, fill: CLAUDE.fill,
-        tone: w.final_pct >= 95 ? "over" : undefined,
-      }))} />
-    </section>
+    <>
+      <section className="reading">
+        <div className="reading-label">
+          {o ? <>Claude {q.plan_label ?? "Max"}, the 5-hour window · opened {hhmm(o.start)} · resets {hhmm(o.reset)} · {minutes(o.minutes_left)} left</>
+            : <>Claude {q.plan_label ?? "Max"}, the 5-hour window · the next one opens with the first message</>}
+        </div>
+        {o ? <OpenWindow o={o} now={q.now} tz={q.tz} hhmm={hhmm} /> : (
+          <div className="quota-figure">
+            <span className="quota-pct">—</span>
+            <span className="quota-of">
+              no window open{last && <> · the last ended {clock.when(last.reset)} at {last.final_pct.toFixed(0)}%{last.capped_at ? `, capped at ${hhmm(last.capped_at)}` : ""}</>}
+            </span>
+          </div>
+        )}
+      </section>
+
+      <section className="section five-windows">
+        <div className="section-head">
+          <h2 className="section-title">The last windows</h2>
+          <div className="section-note">five hours from the first message</div>
+        </div>
+        <RankRows rows={f.windows.map((w) => ({
+          key: w.reset,
+          name: <span className="mono">{clock.day(w.start)} {hhmm(w.start)} → {hhmm(w.reset)}</span>,
+          current: w.current,
+          value: `${w.final_pct.toFixed(0)}%`,
+          sub: w.current ? `${fmtTok(w.tokens)} tokens so far`
+            : `${fmtTok(w.tokens)} tokens${w.capped_at ? `, capped at ${hhmm(w.capped_at)}` : ""}`,
+          share: w.final_pct, fill: CLAUDE.fill,
+          tone: w.final_pct >= 95 ? "over" : undefined,
+        }))} />
+      </section>
+    </>
   );
 }
 
@@ -305,7 +321,7 @@ function OpenWindow({ o, now, tz, hhmm }: { o: FiveHourOpen; now: string; tz: st
   return (
     <>
       <div className="quota-figure">
-        <span className="quota-pct five-pct">{o.used_pct.toFixed(0)}%</span>
+        <span className="quota-pct">{o.used_pct.toFixed(0)}%</span>
         <span className="quota-of">of the window used · {o.elapsed_pct.toFixed(0)}% of the window gone</span>
       </div>
       <Meter used={o.used_pct} elapsed={o.elapsed_pct} projected={p.projected_pct} anchored live />
