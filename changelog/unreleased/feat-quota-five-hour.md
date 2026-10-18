@@ -1,0 +1,2 @@
+### Added
+- The 5-hour window has its own section on the Quota screen: the open window's figure against how much of it is gone, its meter, pace and "at this rate, 100% at hh:mm", when it was capped, its tokens with the estimated budget and what is left, and a line against an even five hours whose readout reads any ten minutes; the last six windows listed under it, the open one in the accent; `five_hour` in `GET /api/quota` is now `{open, windows}` (#59)

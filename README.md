@@ -225,6 +225,20 @@ them with the turns. One machine is enough: the quota belongs to the account.
   its budget and what the reset found unused, its folders, models and
   machines, and the four weeks of hours before its reset. The pace, the
   projection, the 5-hour window and a booked plan belong to the live week.
+- **The 5-hour window has its own section.** Claude meters a second figure,
+  five hours from the first message, and it is the one that runs out
+  mid-session. The open window gets the week's treatment at a smaller scale:
+  its figure against how much of the window is gone, a meter with the now
+  tick, the pace chip, "at this rate, 100% at hh:mm, N before the reset" or
+  "N% by the reset" (after a quarter of an hour, and not once it is capped),
+  when it was capped, the tokens since it opened with the estimated budget
+  and what is left, and a line against an even five hours whose readout reads
+  any ten minutes. The last six windows are listed under it, the open one in
+  the accent, each with its final figure, its tokens and when it was capped;
+  between windows the section says when the last one ended and at what.
+  Readings are grouped by reset (a reset can move by seconds), the running
+  maximum of each group is its line, and the budget is the tokens from the
+  window's start, so a window with little use has no budget yet.
 - **The budget in tokens is an estimate:** Claude Code tokens up to a reading ÷
   that reading's percentage. After a plan change it is not known whether the
   new figure counts the whole week or only the time since the switch, so the
@@ -335,7 +349,7 @@ paths.
 | `GET` | `/api/machines` | Each machine: label policy, last report, collector version, turns and tokens |
 | `GET` | `/api/config` | What the UI needs about this deployment: the rate card's address and the period time zone |
 | `GET` | `/api/overview` | Everything one screen needs for a period (`?period=weekly\|monthly\|yearly`, `?ref=`, `?machine=`, `?source=`): totals with the token split, the same-length period before, by machine, harness, model, project (with its top branches) and origin, and a bucketed series with the empty buckets kept |
-| `GET` | `/api/quota` | The Claude Max week: window, used % against elapsed %, pace and projection, tokens, the estimated budget and what is left, per-day bars, tokens per hour of the window, past weeks, weekday × hour, top models, folders and machines. `?back=N` (0–8) reads the window N weeks earlier to its reset, without pace, projection, 5-hour window or booked plan |
+| `GET` | `/api/quota` | The Claude Max week: window, used % against elapsed %, pace and projection, tokens, the estimated budget and what is left, per-day bars, tokens per hour of the window, past weeks, weekday × hour, top models, folders and machines, and `five_hour`: the open 5-hour window (used, elapsed, minutes left, pace and projection, when it was capped, its readings, tokens per ten minutes, tokens, budget and what is left) and the last six windows. `?back=N` (0–8) reads the window N weeks earlier to its reset, without pace, projection, 5-hour window or booked plan |
 | `GET` | `/api/summary` | Per-tool cost summary with subscription comparison (`?machine=` filters) |
 | `GET` | `/api/projects/mine` | The project labels stored for the calling machine (collector key) |
 | `POST` | `/api/projects/rename` | Move the calling machine's rows from a stored label to its repository (`{"renames": {old: new}}`) |
