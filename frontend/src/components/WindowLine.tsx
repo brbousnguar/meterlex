@@ -39,7 +39,7 @@ export default function WindowLine({ open, now, tz }: { open: FiveHourOpen; now:
   }, []);
   const narrow = width < 520;
   // on a phone every hour label is centred on its hour, so the last one needs room past the plot
-  const W = width, H = narrow ? 176 : 204, R = narrow ? 24 : 10;
+  const W = width, H = narrow ? 214 : 244, R = narrow ? 24 : 10;   // the week line's heights: it is the page now
 
   // ── the series ─────────────────────────────────────────────────────────────
   const x = (ms: number) => L + ((ms - start) / SPAN) * (W - L - R);

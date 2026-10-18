@@ -197,17 +197,22 @@ Forms follow the dataviz skill, except where the house rule is stricter (square 
   projection, the 5-hour window, a booked plan) is not drawn, and "this week"
   reads "that week". The page keeps the week it has while the next one loads,
   dimmed, so a stale week never reads as the new one.
-- **The 5-hour window gets the week's treatment, smaller.** The other figure
-  Claude meters has its own section under the week's: the same figure (at a
-  smaller size) against how much of the window is gone, the same meter, pace
-  chip and reading line, and a window line on the week line's pattern, five
-  hours of clock time with an hour label on every hour, whose readout reads
-  ten minutes at a time (`←` `→` ten minutes, Shift an hour). A capped window
+- **The 5-hour window is a view, not a section.** The header's segmented
+  control, the same one the other screens use for the period, picks Week or
+  5 hours, and the page shows one subject at a time. In 5 hours the open
+  window gets the week's treatment at full size: the same figure against how
+  much of the window is gone, the same meter, pace chip and reading line, and
+  a window line on the week line's pattern (and at its height), five hours of
+  clock time with an hour label on every hour, whose readout reads ten
+  minutes at a time (`←` `→` ten minutes, Shift an hour). A capped window
   shows no projection: "capped at hh:mm" says what happened, and its readout
   past now reads 100%. The last windows are ranked rows named by their day
   and clock times, the open one in the accent, a capped one's figure in the
-  over tone; between windows one sentence says when the last one ended and
-  at what, and the section is not drawn for a past week.
+  over tone; between windows the figure is a dash and one sentence says when
+  the last one ended and at what. The window is live only, so the week
+  steppers leave the header in this view and the label names the window's
+  clock times instead; on a phone the switch takes the page title's place,
+  as the period control does on the other screens.
 - Every figure a chart shows on hover is also readable as text on the same screen.
 
 ## Layout

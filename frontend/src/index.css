@@ -637,6 +637,8 @@ a.linkout::after { content: "↗"; margin-left: auto; color: var(--accent-ink); 
 
 /* ── Quota (the Claude Max week) ──────────────────────────────────────────── */
 .period[data-fixed] .page-title { display: block; font-size: 1.3rem; }
+/* On a phone the Week · 5 hours switch takes the title's place, as the period control does elsewhere. */
+@media (max-width: 719px) { .period[data-fixed] .page-title { display: none; } }
 .quota-figure { display: flex; align-items: baseline; gap: 6px 12px; flex-wrap: wrap; margin: 4px 0 12px; }
 .quota-pct {
   font-family: var(--disp); font-variation-settings: "SOFT" 50; font-weight: 700;
@@ -683,15 +685,11 @@ a.linkout::after { content: "↗"; margin-left: auto; color: var(--accent-ink); 
 .quota-note { margin: 22px 0 0; max-width: 70ch; }
 /* The 5-hour window gets the week's treatment at a smaller size; its windows list sits under
    its own sub-head. */
-.five-pct { font-size: clamp(2.4rem, 10vw, 3.2rem); }
-.five-idle { margin: 2px 0 6px; max-width: 70ch; }
-.five-sub { margin-top: 22px; }
 /* On a phone a window row keeps its times whole: the note takes what is left and wraps in two even lines. */
 @media (max-width: 719px) {
-  .five-hour .rank-row { grid-template-columns: auto minmax(0, 1fr); }
-  .five-hour .rank-value + .rank-sub { text-wrap: balance; }
+  .five-windows .rank-row { grid-template-columns: auto minmax(0, 1fr); }
+  .five-windows .rank-value + .rank-sub { text-wrap: balance; }
 }
-.section-title.small { font-size: 1rem; }
 /* The page keeps the week it has while the next one loads, dimmed so it never reads as the new one. */
 .quota[data-stale] { opacity: .45; transition: opacity .15s; }
 .quota-cols { display: grid; gap: 0 22px; }
