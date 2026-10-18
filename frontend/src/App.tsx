@@ -134,6 +134,8 @@ export default function App() {
           {tab === "quota" && <>
           {/* The two windows Claude meters, one at a time: the week, or the 5-hour window. */}
           <Seg label="Quota window" value={mode} options={QUOTA_MODES} onPick={pickMode} />
+          {/* The steppers and the label keep to the right end, so the switch stays put when the steppers go. */}
+          <div className="period-end">
           {mode === "week" ? <>
           {/* The Quota week: the same steppers, a week at a time, back to the oldest week listed. */}
           <div className="steps">
@@ -150,6 +152,7 @@ export default function App() {
             <small>{!week ? " " : week.five ? `${hhmm(week.five.start, week.tz)} → ${hhmm(week.five.reset, week.tz)}` : "opens with the first message"}</small>
           </div>
           )}
+          </div>
           </>}
           {tab !== "quota" && <>
           <Seg label="Period" value={period} options={PERIODS} onPick={pick} />

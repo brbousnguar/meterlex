@@ -211,8 +211,11 @@ Forms follow the dataviz skill, except where the house rule is stricter (square 
   over tone; between windows the figure is a dash and one sentence says when
   the last one ended and at what. The window is live only, so the week
   steppers leave the header in this view and the label names the window's
-  clock times instead; on a phone the switch takes the page title's place,
-  as the period control does on the other screens.
+  clock times instead. The switch sits beside the title, where the other
+  screens keep their period control, and the steppers and the label are one
+  cluster at the right end, so the switch stays put in both views; on a
+  phone the switch takes the page title's place and the cluster wraps under
+  it as one unit.
 - Every figure a chart shows on hover is also readable as text on the same screen.
 
 ## Layout

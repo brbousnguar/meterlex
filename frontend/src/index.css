@@ -636,7 +636,13 @@ a.linkout::after { content: "↗"; margin-left: auto; color: var(--accent-ink); 
 @keyframes fade { from { opacity: 0; } }
 
 /* ── Quota (the Claude Max week) ──────────────────────────────────────────── */
-.period[data-fixed] .page-title { display: block; font-size: 1.3rem; }
+/* The Quota header: the title, then the Week · 5 hours switch beside it, where the other
+   tabs keep their period control; the steppers and the label are one cluster at the right
+   end, so the switch stays put when the steppers leave with the 5-hour view. */
+.period[data-fixed] .page-title { display: block; font-size: 1.3rem; margin-right: 6px; }
+.period-end { display: flex; align-items: center; gap: 10px; margin-left: auto; min-width: 0; flex-wrap: wrap; justify-content: flex-end; }
+/* On a phone the cluster dissolves: the steppers stay on the switch's row and only the label wraps under. */
+@media (max-width: 719px) { .period-end { display: contents; } }
 /* On a phone the Week · 5 hours switch takes the title's place, as the period control does elsewhere. */
 @media (max-width: 719px) { .period[data-fixed] .page-title { display: none; } }
 .quota-figure { display: flex; align-items: baseline; gap: 6px 12px; flex-wrap: wrap; margin: 4px 0 12px; }
