@@ -319,6 +319,8 @@ button.section-note { min-height: 30px; padding: 4px 2px 4px 10px; font-weight: 
 }
 .rank-row:first-child { padding-top: 2px; }
 .rank-row:last-child { border-bottom: 0; padding-bottom: 2px; }
+/* The row the page is showing, in a list whose rows open one (the Quota weeks). */
+.rank-row[aria-current] .rank-name { font-weight: 700; color: var(--accent-ink); }
 .rank-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .rank-name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dot { width: 10px; height: 10px; flex-shrink: 0; }
@@ -679,6 +681,8 @@ a.linkout::after { content: "↗"; margin-left: auto; color: var(--accent-ink); 
 .heat-h, .heat-d { font-family: var(--mono); font-size: .62rem; color: var(--ink-2); }
 .heat-c { display: block; aspect-ratio: 1; min-height: 8px; }
 .quota-note { margin: 22px 0 0; max-width: 70ch; }
+/* The page keeps the week it has while the next one loads, dimmed so it never reads as the new one. */
+.quota[data-stale] { opacity: .45; transition: opacity .15s; }
 .quota-cols { display: grid; gap: 0 22px; }
 @media (min-width: 1000px) { .quota-cols { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; } }
 /* The week line reads like the bar charts: the whole plot is the hit target. */

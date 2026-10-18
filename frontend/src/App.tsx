@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import Seg, { useThumb } from "./components/Seg";
-import { api, type Overview, type Period } from "./api";
+import { api, QUOTA_WEEKS_BACK, type Overview, type Period } from "./api";
 import { PERIODS, periodLabel, recall, remember, stepRef, UNITS, windowLabel, type Unit } from "./lib";
 import Now from "./screens/Now";
 import Machines from "./screens/Machines";
 import Harnesses from "./screens/Harnesses";
 import Models from "./screens/Models";
 import More from "./screens/More";
-import Quota from "./screens/Quota";
+import Quota, { type QuotaWeek } from "./screens/Quota";
 
 export type Tab = "now" | "quota" | "machines" | "harnesses" | "models" | "more";
 
@@ -54,6 +54,8 @@ export default function App() {
   const [period, setPeriod] = useState<Period>(() => (recall("mx.period") as Period) || "weekly");
   const [unit, setUnit] = useState<Unit>(() => (recall("mx.unit") as Unit) || "tokens");
   const [ref, setRef] = useState<string | null>(null);      // null = the current period
+  const [back, setBack] = useState(0);                      // the Quota week in view, weeks before this one
+  const [week, setWeek] = useState<QuotaWeek | null>(null); // the window the Quota screen last read
   const [data, setData] = useState<Overview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const tabs = useThumb<HTMLElement>(tab);
@@ -78,6 +80,21 @@ export default function App() {
     const current = stepRef(period, null, 0);
     setRef(next === current ? null : next);
   };
+
+  const stepWeek = (delta: number) => setBack((b) => Math.max(0, Math.min(QUOTA_WEEKS_BACK, b + delta)));
+  // ← → step the Quota week when nothing else wants the keys (the week line takes them while focused)
+  useEffect(() => {
+    if (tab !== "quota") return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+      if ((e.target as HTMLElement | null)?.closest("input, select, textarea, [tabindex]")) return;
+      stepWeek(e.key === "ArrowLeft" ? 1 : -1);
+      e.preventDefault();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [tab]);
+  const dayOf = (iso: string, tz: string) => new Date(iso).toLocaleDateString("en-GB", { timeZone: tz, day: "numeric", month: "short" });
 
   const isCurrent = ref === null;
   const label = data ? periodLabel(period, data.from_local, isCurrent) : "…";
@@ -108,6 +125,17 @@ export default function App() {
 
         <div className="period" data-fixed={tab === "quota" ? "" : undefined}>
           <h1 className="page-title">{TABS.find((t) => t.id === tab)?.title}</h1>
+          {tab === "quota" && <>
+          {/* The Quota week: the same steppers, a week at a time, back to the oldest week listed. */}
+          <div className="steps">
+            <button className="step" onClick={() => stepWeek(1)} disabled={back >= QUOTA_WEEKS_BACK} aria-label="The week before">‹</button>
+            <button className="step" onClick={() => stepWeek(-1)} disabled={back === 0} aria-label="The week after">›</button>
+          </div>
+          <div className="period-label">
+            {back === 0 ? "This week" : back === 1 ? "Last week" : `${back} weeks back`}
+            <small>{week && week.back === back ? `${dayOf(week.start, week.tz)} → ${dayOf(week.reset, week.tz)}` : " "}</small>
+          </div>
+          </>}
           {tab !== "quota" && <>
           <Seg label="Period" value={period} options={PERIODS} onPick={pick} />
           <div className="steps">
@@ -127,7 +155,7 @@ export default function App() {
         {error && tab !== "quota" && <p className="err">The hub did not answer ({error}). Retrying every minute.</p>}
         {!data && !error && tab !== "quota" && <p className="empty">Reading the meters…</p>}
         {data && tab === "now"       && <Now data={data} unit={unit} go={go} />}
-        {tab === "quota"             && <Quota />}
+        {tab === "quota"             && <Quota back={back} onBack={setBack} onWeek={setWeek} />}
         {data && tab === "machines"  && <Machines data={data} unit={unit} />}
         {data && tab === "harnesses" && <Harnesses data={data} unit={unit} />}
         {data && tab === "models"    && <Models data={data} unit={unit} />}

@@ -189,6 +189,14 @@ Forms follow the dataviz skill, except where the house rule is stricter (square 
   scale, nothing joins them, and nothing is shaded or ghosted, because five days on
   the old plan are still the week. A change booked for a later day is a dotted
   hairline in `--ink-3` ahead of now, and the projection stops at it.
+- **A past week is the same page, read to its reset.** The header's steppers are
+  the period steppers' Atlas buttons (`‹` the week before, `›` the week after,
+  disabled at the ends) with the window's dates as their label, and a row under
+  Past weeks opens its week and is named in the accent while it is open. What
+  belongs to the live week alone (the now line and tick, the pace chip, the
+  projection, the 5-hour window, a booked plan) is not drawn, and "this week"
+  reads "that week". The page keeps the week it has while the next one loads,
+  dimmed, so a stale week never reads as the new one.
 - Every figure a chart shows on hover is also readable as text on the same screen.
 
 ## Layout

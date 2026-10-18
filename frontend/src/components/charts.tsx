@@ -138,6 +138,8 @@ export function RankRows({ rows }: {
     /** Split the bar by harness, the way the folder map is coloured. */
     parts?: { value: number; fill: string }[];
     onClick?: () => void;
+    /** The row the page is showing, in a list whose rows open one. */
+    current?: boolean;
   }[];
 }) {
   if (!rows.length) return <div className="empty">Nothing recorded in this period.</div>;
@@ -146,7 +148,8 @@ export function RankRows({ rows }: {
       {rows.map((r) => {
         const Row = r.onClick ? "button" : "div";
         return (
-          <Row className="rank-row" key={r.key} onClick={r.onClick} type={r.onClick ? "button" : undefined}>
+          <Row className="rank-row" key={r.key} onClick={r.onClick} type={r.onClick ? "button" : undefined}
+               aria-current={r.current ? "true" : undefined}>
             <div className="rank-name"><i className="dot" style={{ background: r.fill }} />{r.name}</div>
             <div style={{ textAlign: "right" }}>
               <div className={`rank-value${r.tone ? ` ${r.tone}` : ""}`}>{r.value}</div>

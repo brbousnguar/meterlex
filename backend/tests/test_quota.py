@@ -250,3 +250,42 @@ def test_the_next_plan_round_trips_through_the_settings_api(client):
     assert client.patch("/api/settings", json={"plan_next": "max 5x; drop table"}).status_code == 400
     r = client.patch("/api/settings", json={"plan_next": "", "plan_next_on": ""})
     assert (r.json()["plan_next"], r.json()["plan_next_on"]) == ("", "")
+
+
+# ── browsing past weeks (#57) ───────────────────────────────────────────────
+
+def test_a_past_window_is_read_to_its_own_end(session):
+    _switch_week(session)
+    v = quota.view(session, RESET + timedelta(days=2), PARIS, back=1)
+    w = v["window"]
+    assert (w["back"], w["start"], w["reset"], w["end"]) == (1, quota._iso(START), quota._iso(RESET), quota._iso(RESET))
+    assert (w["elapsed_pct"], w["days_left"]) == (100.0, 0.0)
+    assert (v["used_pct"], v["plan_label"], v["plan_change"]["from_label"]) == (10.0, "Max 20x", "Max 5x")
+    assert v["pace"] is None and v["five_hour"] is None and v["plan_next"] is None
+    assert v["tokens"]["used"] == 1080 and v["by_model"] == [{"key": "claude-opus-5", "tokens": 1080}]
+    assert (v["tokens"]["budget"], v["tokens"]["budget_from"]) == (2000, "the 4 points since the switch")
+    assert v["tokens"]["left"] == {"tokens": 1800, "per_day": None}      # what the reset found unused
+    assert not any(d["future"] or d["current"] for d in v["days"]) and v["days"][4]["end_pct"] == 10.0
+    assert sum(v["hourly"]) == 1080
+    # the list of past weeks stays the live window's; the week in view is in it by its index
+    assert [p["back"] for p in v["past"]] == list(range(1, 9)) and v["past"][0]["start"] == w["start"]
+    # a week before the readings began names no plan, rather than the plan of today
+    before = quota.view(session, RESET + timedelta(days=2), PARIS, back=3)
+    assert (before["plan"], before["plan_label"], before["used_pct"], before["tokens"]["budget"]) == (None, None, None, None)
+
+
+def test_the_live_window_ends_now_and_the_index_is_clamped(session):
+    m = _machine(session)
+    ingest.ingest_quota(session, m, [_reading(START + timedelta(days=1), 2.0)])
+    now = START + timedelta(days=2)
+    v = quota.view(session, now, PARIS)
+    assert (v["window"]["back"], v["window"]["end"]) == (0, quota._iso(now))
+    assert quota.view(session, now, PARIS, back=99)["window"]["back"] == quota.PAST_WINDOWS
+
+
+def test_the_api_opens_a_past_week_within_the_list(client, engine):
+    with Session(engine) as session:
+        ingest.ingest_quota(session, _machine(session), [_reading(START + timedelta(days=1), 40.0)])
+    assert client.get("/api/quota?back=1").json()["window"]["back"] == 1
+    assert client.get("/api/quota?back=9").status_code == 422
+    assert client.get("/api/quota?back=-1").status_code == 422
