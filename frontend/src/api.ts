@@ -237,6 +237,25 @@ export interface QuotaPast {
   /** the plan a week with a switch started on */
   switched_from_label: string | null;
 }
+/** The open 5-hour window: it began with the first message, five hours before its reset. */
+export interface FiveHourOpen {
+  used_pct: number; reset: string; at: string; machine: string; start: string;
+  elapsed_pct: number; minutes_left: number;
+  /** when a reading first found it at 100% */
+  capped_at: string | null;
+  /** against an even five hours; `runs_out_at` is when this rate reaches 100%, before the reset */
+  pace: { delta_pts: number; status: "ahead" | "behind" | "on"; projected_pct: number | null; runs_out_at: string | null };
+  history: { at: string; pct: number }[];
+  /** Claude Code tokens per ten minutes of the window, from its start (30) */
+  slots: number[];
+  /** the budget is tokens by the last reading ÷ the points it read, as the week's */
+  tokens: { used: number; budget: number | null; left: number | null };
+}
+export interface FiveHourWindow {
+  start: string; reset: string; final_pct: number; tokens: number; capped_at: string | null;
+  /** the open one */
+  current: boolean; last_read: string;
+}
 export interface Quota {
   now: string;
   tz: string;
@@ -262,7 +281,9 @@ export interface Quota {
     estimate: { from: string; to: string | null; pct: number; tokens: number; budget: number; plan_label: string | null }[];
     left: { tokens: number; per_day: number | null } | null;
   };
-  five_hour: { used_pct: number; reset: string; at: string } | null;
+  /** the 5-hour window: the open one, if any, and the last windows newest first;
+   * null for a past week, or before any reading */
+  five_hour: { open: FiveHourOpen | null; windows: FiveHourWindow[] } | null;
   history: { at: string; pct: number; plan_label: string | null }[];
   days: QuotaDay[];
   /** Claude Code tokens per hour of the window, from its start (168) */

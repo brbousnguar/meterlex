@@ -30,6 +30,9 @@ WEEK = timedelta(days=7)
 DAY = timedelta(days=1)
 SOURCE = "claude-code"          # the turns that count against Claude Max
 PAST_WINDOWS = 8
+FIVE = timedelta(hours=5)       # the other window Claude meters: five hours from the first message
+FIVE_SLOT = timedelta(minutes=10)
+FIVE_WINDOWS = 6                # the 5-hour windows listed, newest first
 MIN_PCT_FOR_BUDGET = 3.0        # below this a budget is mostly rounding noise
 SAME_RESET = timedelta(hours=1) # resets_at can move by seconds between readings
 PACE_BAND = 2.0                 # points either side of the pace that read as "on pace"
@@ -203,6 +206,93 @@ def stamp_plan(session: Session, plan: str, before: datetime, apply: bool = Fals
     return len(rows)
 
 
+def _five_clusters(rs: list) -> list:
+    """The 5-hour readings grouped by window, one cluster per reset, each in
+    time order; a reset can move by seconds between readings."""
+    clusters: list = []
+    for r in sorted(rs, key=lambda r: r.ts):
+        for c in clusters:
+            if abs(c[0].resets_at - r.resets_at) <= SAME_RESET:
+                c.append(r)
+                break
+        else:
+            clusters.append([r])
+    return clusters
+
+
+def five_hour_view(session: Session, now: datetime, tokens_between) -> Optional[dict]:
+    """The 5-hour window Claude meters beside the week: the one that runs out
+    mid-session. It opens with the first message and resets five hours later,
+    so its start is the reset less five hours. The open window is the one
+    whose reset is still ahead, read with its pace, its projection (at this
+    rate: the figure by the reset, or when it hits 100%), its readings for the
+    line, its tokens in ten-minute slots and a budget from them, as the week
+    has. The last windows are listed newest first, each with its final figure
+    and when it was capped, if it was. None without any reading."""
+    rs = [r for r in _readings(session, "five_hour", now - 3 * DAY) if r.ts <= now]
+    if not rs:
+        return None
+    windows = []
+    for cluster in _five_clusters(rs):
+        line = _line(cluster)
+        reset = line[-1].resets_at
+        start = reset - FIVE
+        capped = next((r for r in line if r.used_pct >= 100), None)
+        windows.append({
+            "start": start, "reset": reset, "line": line,
+            "final_pct": line[-1].used_pct, "capped_at": capped.ts if capped else None,
+            "tokens": tokens_between(start, min(reset, now)),
+        })
+    windows.sort(key=lambda w: w["reset"], reverse=True)
+    ahead = [w for w in windows if w["reset"] > now]
+    open_ = max(ahead, key=lambda w: w["line"][-1].ts) if ahead else None
+
+    detail = None
+    if open_ is not None:
+        start, reset, line = open_["start"], open_["reset"], open_["line"]
+        last = line[-1]
+        used = last.used_pct
+        elapsed = min(1.0, max(0.0, (now - start) / FIVE))
+        delta = used - elapsed * 100
+        projected = runs_out = None
+        # a quarter of an hour in (a burst projects nonsense), and not once it is capped
+        if now - start >= 0.05 * FIVE and elapsed > 0 and used < 100:
+            projected = used / elapsed
+            if projected > 100 and used > 0:
+                runs_out = start + (now - start) * (100 / used)
+        budget = _part_budget(line, (start, 0.0), tokens_between)
+        left = max(0.0, budget * (100 - used) / 100 - tokens_between(last.ts, now)) if budget else None
+        slots = [tokens_between(start + i * FIVE_SLOT, min(now, start + (i + 1) * FIVE_SLOT))
+                 if start + i * FIVE_SLOT < now else 0 for i in range(int(FIVE / FIVE_SLOT))]
+        detail = {
+            "used_pct": used, "reset": _iso(reset), "at": _iso(last.ts), "machine": last.machine,
+            "start": _iso(start), "elapsed_pct": round(elapsed * 100, 1),
+            "minutes_left": max(0, round((reset - now) / timedelta(minutes=1))),
+            "capped_at": _iso(open_["capped_at"]),
+            "pace": {
+                "delta_pts": round(delta, 1),
+                "status": "ahead" if delta > PACE_BAND else "behind" if delta < -PACE_BAND else "on",
+                "projected_pct": round(projected, 1) if projected is not None else None,
+                "runs_out_at": _iso(runs_out),
+            },
+            "history": [{"at": _iso(r.ts), "pct": r.used_pct} for r in line],
+            "slots": slots,
+            "tokens": {
+                "used": open_["tokens"],
+                "budget": round(budget) if budget else None,
+                "left": round(left) if left is not None else None,
+            },
+        }
+    return {
+        "open": detail,
+        "windows": [{
+            "start": _iso(w["start"]), "reset": _iso(w["reset"]), "final_pct": w["final_pct"],
+            "tokens": w["tokens"], "capped_at": _iso(w["capped_at"]), "current": w is open_,
+            "last_read": _iso(w["line"][-1].ts),
+        } for w in windows[:FIVE_WINDOWS]],
+    }
+
+
 def view(session: Session, now: datetime, tz: ZoneInfo, back: int = 0) -> dict:
     """The window `back` weeks before the current one (0: this week), read to
     its own end. A past window is complete, so its figures are the week's
@@ -361,13 +451,7 @@ def view(session: Session, now: datetime, tz: ZoneInfo, back: int = 0) -> dict:
     def ranked(d: dict, n: int) -> list:
         return [{"key": k, "tokens": v} for k, v in sorted(d.items(), key=lambda kv: -kv[1])[:n]]
 
-    five = _latest(session, "five_hour") if live else None
-    five_hour = None
-    if five is not None and five.resets_at > now:
-        same = _line([r for r in _readings(session, "five_hour", now - timedelta(hours=6))
-                      if abs(r.resets_at - five.resets_at) <= SAME_RESET])
-        top = same[-1] if same else five
-        five_hour = {"used_pct": top.used_pct, "reset": _iso(top.resets_at), "at": _iso(top.ts)}
+    five_hour = five_hour_view(session, now, tokens_between) if live else None
 
     return {
         "now": _iso(now),

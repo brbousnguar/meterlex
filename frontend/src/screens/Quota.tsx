@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, type Quota as QuotaData } from "../api";
+import { api, type FiveHourOpen, type Quota as QuotaData } from "../api";
 import Bars, { type BarPoint } from "../components/Bars";
 import { RankRows } from "../components/charts";
 import WeekLine from "../components/WeekLine";
+import WindowLine from "../components/WindowLine";
 import { fmtInt, fmtTok, folderLabel, harness, pct } from "../lib";
 
 /* The Claude Max weekly quota. Anthropic meters it as a percentage with a reset
@@ -106,9 +107,6 @@ function QuotaView({ q, onBack }: { q: QuotaData; onBack: (back: number) => void
           {p?.projected_pct != null && (
             <span className="rank-sub">at this rate, {p.projected_pct.toFixed(0)}% by the reset</span>
           )}
-          {q.five_hour && (
-            <span className="rank-sub">5-hour window {q.five_hour.used_pct.toFixed(0)}%, resets {clock.when(q.five_hour.reset).split(", ").pop()}</span>
-          )}
           {q.reading && (
             <span className="rank-sub">{live ? "read" : "last read"} {clock.when(q.reading.at)} on <span className="mono">{q.reading.machine}</span></span>
           )}
@@ -169,6 +167,8 @@ function QuotaView({ q, onBack }: { q: QuotaData; onBack: (back: number) => void
           </div>
         </div>
       </section>
+
+      {live && q.five_hour && <FiveHour f={q.five_hour} now={q.now} tz={q.tz} />}
 
       <section className="section">
         <div className="section-head">
@@ -254,6 +254,80 @@ function QuotaView({ q, onBack }: { q: QuotaData; onBack: (back: number) => void
         budget and the past weeks' average only use readings on the current plan, and after a switch
         the budget comes from the points gained since.
       </p>
+    </>
+  );
+}
+
+const minutes = (m: number) => m >= 60 ? `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}` : `${m} min`;
+
+/** The 5-hour window: the other figure Claude meters, the one that runs out mid-session. It opens
+ *  with the first message and resets five hours later. The open one gets the week's treatment
+ *  (figure, meter, pace, line); the last windows are listed under it, the open one in the accent. */
+function FiveHour({ f, now, tz }: { f: NonNullable<QuotaData["five_hour"]>; now: string; tz: string }) {
+  const clock = useClock(tz);
+  const hhmm = (iso: string) => new Date(iso).toLocaleTimeString("en-GB", { timeZone: tz, hour: "2-digit", minute: "2-digit" });
+  const o = f.open;
+  const last = f.windows[0];
+  return (
+    <section className="section five-hour">
+      <div className="section-head">
+        <h2 className="section-title">The 5-hour window</h2>
+        <div className="section-note">{o ? `resets ${hhmm(o.reset)} · ${minutes(o.minutes_left)} left` : "none open"}</div>
+      </div>
+      {o ? <OpenWindow o={o} now={now} tz={tz} hhmm={hhmm} /> : last ? (
+        <p className="rank-sub five-idle">
+          No window open: the next one starts with the first message. The last ended {clock.when(last.reset)} at {last.final_pct.toFixed(0)}%
+          {last.capped_at ? `, capped at ${hhmm(last.capped_at)}` : ""}.
+        </p>
+      ) : null}
+      <div className="section-head five-sub">
+        <h3 className="section-title small">The last windows</h3>
+        <div className="section-note">five hours from the first message</div>
+      </div>
+      <RankRows rows={f.windows.map((w) => ({
+        key: w.reset,
+        name: <span className="mono">{clock.day(w.start)} {hhmm(w.start)} → {hhmm(w.reset)}</span>,
+        current: w.current,
+        value: `${w.final_pct.toFixed(0)}%`,
+        sub: w.current ? `${fmtTok(w.tokens)} tokens so far`
+          : `${fmtTok(w.tokens)} tokens${w.capped_at ? `, capped at ${hhmm(w.capped_at)}` : ""}`,
+        share: w.final_pct, fill: CLAUDE.fill,
+        tone: w.final_pct >= 95 ? "over" : undefined,
+      }))} />
+    </section>
+  );
+}
+
+function OpenWindow({ o, now, tz, hhmm }: { o: FiveHourOpen; now: string; tz: string; hhmm: (iso: string) => string }) {
+  const p = o.pace;
+  const tone = p.status === "ahead" ? "over" : p.status === "behind" ? "under" : undefined;
+  const before = p.runs_out_at ? Math.round((Date.parse(o.reset) - Date.parse(p.runs_out_at)) / 60_000) : null;
+  return (
+    <>
+      <div className="quota-figure">
+        <span className="quota-pct five-pct">{o.used_pct.toFixed(0)}%</span>
+        <span className="quota-of">of the window used · {o.elapsed_pct.toFixed(0)}% of the window gone</span>
+      </div>
+      <Meter used={o.used_pct} elapsed={o.elapsed_pct} projected={p.projected_pct} anchored live />
+      <div className="reading-meta">
+        <span className={`pace-chip${tone ? ` ${tone}` : ""}`}>
+          {p.status === "on" ? "on pace" : `${Math.abs(p.delta_pts).toFixed(0)} pts ${p.status === "ahead" ? "ahead of" : "behind"} pace`}
+        </span>
+        {p.projected_pct != null && (
+          <span className="rank-sub">
+            {p.runs_out_at && before !== null
+              ? `at this rate, 100% at ${hhmm(p.runs_out_at)}, ${minutes(before)} before the reset`
+              : `at this rate, ${p.projected_pct.toFixed(0)}% by the reset`}
+          </span>
+        )}
+        {o.capped_at && <span className="rank-sub">capped at {hhmm(o.capped_at)}</span>}
+        <span className="rank-sub">read {hhmm(o.at)} on <span className="mono">{o.machine}</span></span>
+        <span className="rank-sub">
+          {fmtTok(o.tokens.used)} tokens since {hhmm(o.start)}
+          {o.tokens.budget ? ` · ≈ ${fmtTok(o.tokens.budget)} for the window, ${fmtTok(o.tokens.left ?? 0)} left` : ""}
+        </span>
+      </div>
+      <WindowLine open={o} now={now} tz={tz} />
     </>
   );
 }

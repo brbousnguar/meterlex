@@ -89,8 +89,9 @@ def test_the_five_hour_window_shows_only_until_it_resets(session):
     m = _machine(session)
     now = START + timedelta(days=1)
     ingest.ingest_quota(session, m, [_reading(now - timedelta(hours=1), 23.5, reset=now + timedelta(hours=2), window="five_hour")])
-    assert quota.view(session, now, PARIS)["five_hour"]["used_pct"] == 23.5
-    assert quota.view(session, now + timedelta(hours=3), PARIS)["five_hour"] is None
+    assert quota.view(session, now, PARIS)["five_hour"]["open"]["used_pct"] == 23.5
+    later = quota.view(session, now + timedelta(hours=3), PARIS)["five_hour"]
+    assert later["open"] is None and later["windows"][0]["final_pct"] == 23.5
 
 
 def test_the_api_takes_quota_beside_turns(client, engine):
@@ -289,3 +290,67 @@ def test_the_api_opens_a_past_week_within_the_list(client, engine):
     assert client.get("/api/quota?back=1").json()["window"]["back"] == 1
     assert client.get("/api/quota?back=9").status_code == 422
     assert client.get("/api/quota?back=-1").status_code == 422
+
+
+# ── the 5-hour window (#59) ─────────────────────────────────────────────────
+
+FIVE_RESET = START + timedelta(days=1, hours=5)      # the open window: began a day in, resets five hours later
+FIVE_START = FIVE_RESET - timedelta(hours=5)
+
+
+def _five_hour_day(session):
+    """A window that ended at 100% an hour before the open one began, then the
+    open one: 10% after half an hour, 45% at 2h30 (a stale 30% after it is a
+    session that fell behind)."""
+    m = _machine(session)
+    prev_reset = FIVE_START - timedelta(hours=1)
+    _turn(session, prev_reset - timedelta(hours=4), 900)
+    _turn(session, FIVE_START + timedelta(hours=1), 300)
+    _turn(session, FIVE_START + timedelta(hours=2), 200)
+    ingest.ingest_quota(session, m, [
+        _reading(prev_reset - timedelta(hours=4, minutes=30), 40.0, reset=prev_reset, window="five_hour"),
+        _reading(prev_reset - timedelta(hours=2), 100.0, reset=prev_reset, window="five_hour"),
+        _reading(FIVE_START + timedelta(minutes=30), 10.0, reset=FIVE_RESET, window="five_hour"),
+        _reading(FIVE_START + timedelta(hours=2, minutes=30), 45.0, reset=FIVE_RESET, window="five_hour"),
+        _reading(FIVE_START + timedelta(hours=2, minutes=40), 30.0, reset=FIVE_RESET, window="five_hour"),
+        _reading(START + timedelta(days=1), 20.0),            # the week's own reading
+    ])
+
+
+def test_the_open_five_hour_window_is_read_with_its_pace_tokens_and_the_windows_before(session):
+    _five_hour_day(session)
+    now = FIVE_START + timedelta(hours=3)                   # 60% of the window gone
+    f = quota.view(session, now, PARIS)["five_hour"]
+    o = f["open"]
+    assert (o["used_pct"], o["start"], o["reset"], o["elapsed_pct"], o["minutes_left"]) \
+        == (45.0, quota._iso(FIVE_START), quota._iso(FIVE_RESET), 60.0, 120)
+    assert o["at"] == quota._iso(FIVE_START + timedelta(hours=2, minutes=30)) and o["capped_at"] is None
+    # 45 points in 3 of 5 hours: 15 behind an even pace, 75% by the reset, never 100%
+    assert o["pace"] == {"delta_pts": -15.0, "status": "behind", "projected_pct": 75.0, "runs_out_at": None}
+    assert [h["pct"] for h in o["history"]] == [10.0, 45.0]
+    # 500 tokens by the last reading ÷ 45 points; what the figure leaves, nothing spent since
+    assert o["tokens"] == {"used": 500, "budget": 1111, "left": 611}
+    assert len(o["slots"]) == 30 and o["slots"][6] == 300 and o["slots"][12] == 200 and sum(o["slots"]) == 500
+    # the windows, newest first: the open one, then the one that hit 100%
+    assert [(w["final_pct"], w["current"], w["tokens"]) for w in f["windows"]] == [(45.0, True, 500), (100.0, False, 900)]
+    assert f["windows"][1]["capped_at"] == quota._iso(FIVE_START - timedelta(hours=3))
+
+
+def test_a_five_hour_window_ahead_of_pace_says_when_it_runs_out(session):
+    m = _machine(session)
+    ingest.ingest_quota(session, m, [_reading(FIVE_START + timedelta(hours=2), 80.0, reset=FIVE_RESET, window="five_hour")])
+    now = FIVE_START + timedelta(hours=2, minutes=30)          # 80% in half the window
+    o = quota.view(session, now, PARIS)["five_hour"]["open"]
+    assert o["pace"]["status"] == "ahead" and o["pace"]["projected_pct"] == 160.0
+    assert o["pace"]["runs_out_at"] == quota._iso(FIVE_START + timedelta(hours=3, minutes=7, seconds=30))
+    assert o["tokens"] == {"used": 0, "budget": None, "left": None}
+
+
+def test_between_five_hour_windows_nothing_is_open_and_the_last_ones_are_listed(session):
+    _five_hour_day(session)
+    f = quota.view(session, FIVE_RESET + timedelta(minutes=10), PARIS)["five_hour"]
+    assert f["open"] is None and [w["final_pct"] for w in f["windows"]] == [45.0, 100.0]
+    assert not any(w["current"] for w in f["windows"])
+    # a past week has no 5-hour window, and a hub without any reading none at all
+    assert quota.view(session, FIVE_RESET + timedelta(days=8), PARIS, back=1)["five_hour"] is None
+    assert quota.view(session, FIVE_START - timedelta(days=2), PARIS)["five_hour"] is None
