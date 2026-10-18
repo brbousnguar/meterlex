@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 
 from sqlmodel import Session, select
 
-from models import Machine, QuotaReading, UsageTurn
+from models import Machine, QuotaReading, Setting, UsageTurn
 import ingest
 import machines
 import quota
@@ -208,3 +208,45 @@ def test_readings_keep_their_plan_and_freshness_and_old_ones_can_be_named(sessio
     assert quota.stamp_plan(session, "default_claude_max_5x", START, apply=True) == 1
     assert session.get(QuotaReading, rows[90.0].id).plan == "default_claude_max_5x"
     assert quota.plan_label("default_claude_max_5x") == "Max 5x" and quota.plan_label(None) is None
+
+
+# ── the marks of a switch: the projection, past weeks, the next plan (#54) ────
+
+def test_after_a_switch_the_projection_runs_at_the_new_plans_rate(session):
+    _switch_week(session)
+    # less than a day on Max 20x since its first tick (6% at day 4 + 3h): nothing to say yet
+    assert quota.view(session, START + timedelta(days=5), PARIS)["pace"]["projected_pct"] is None
+    # 4 points in the 25 hours since the tick, 44 hours to the reset: 10 + 4 × 44 / 25
+    v = quota.view(session, START + timedelta(days=5, hours=4), PARIS)
+    assert v["pace"]["projected_pct"] == 17.0
+    assert v["pace"]["status"] == "behind"          # 10% with 74% of the week gone, still
+
+
+def test_a_past_week_with_a_switch_names_both_plans(session):
+    _switch_week(session)
+    v = quota.view(session, RESET + timedelta(hours=1), PARIS)
+    assert (v["past"][0]["plan_label"], v["past"][0]["switched_from_label"]) == ("Max 20x", "Max 5x")
+    assert v["past"][1]["switched_from_label"] is None
+
+
+def test_the_next_plan_shows_until_a_reading_names_it(session):
+    m = _machine(session)
+    session.add(Setting(key="plan_next", value="default_claude_max_5x"))
+    session.add(Setting(key="plan_next_on", value="2026-10-08"))
+    session.commit()
+    ingest.ingest_quota(session, m, [dict(_reading(START + timedelta(hours=1), 1.0), plan="default_claude_max_20x", fresh=True)])
+    v = quota.view(session, START + timedelta(hours=2), PARIS)
+    assert v["plan_next"] == {"plan": "default_claude_max_5x", "plan_label": "Max 5x", "on": "2026-10-08",
+                              "at": "2026-10-07T22:00:00Z"}       # the day starts at Paris midnight
+    ingest.ingest_quota(session, m, [dict(_reading(START + timedelta(days=5), 30.0), plan="default_claude_max_5x", fresh=True)])
+    assert quota.view(session, START + timedelta(days=5, hours=1), PARIS)["plan_next"] is None
+
+
+def test_the_next_plan_round_trips_through_the_settings_api(client):
+    r = client.patch("/api/settings", json={"plan_next": "default_claude_max_5x", "plan_next_on": "2026-11-14"})
+    assert r.status_code == 200
+    assert (r.json()["plan_next"], r.json()["plan_next_on"]) == ("default_claude_max_5x", "2026-11-14")
+    assert client.patch("/api/settings", json={"plan_next_on": "14/11/2026"}).status_code == 400
+    assert client.patch("/api/settings", json={"plan_next": "max 5x; drop table"}).status_code == 400
+    r = client.patch("/api/settings", json={"plan_next": "", "plan_next_on": ""})
+    assert (r.json()["plan_next"], r.json()["plan_next_on"]) == ("", "")

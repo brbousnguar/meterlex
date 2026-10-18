@@ -183,6 +183,12 @@ Forms follow the dataviz skill, except where the house rule is stricter (square 
 - **Each machine gets its own bars, not a sparkline**, with its readout printed as
   one line above the 94px plot. The bars wear the machine's main harness; the busiest
   is ink, and it is named in text underneath.
+- **The week line names its plan above the plot**, in small mono caps (`--ink-2`,
+  10.5px, letter-spaced) at the start of each stretch. A plan change is a dashed
+  hairline in `--ink-2` where it happened: each side is its own series on its own
+  scale, nothing joins them, and nothing is shaded or ghosted, because five days on
+  the old plan are still the week. A change booked for a later day is a dotted
+  hairline in `--ink-3` ahead of now, and the projection stops at it.
 - Every figure a chart shows on hover is also readable as text on the same screen.
 
 ## Layout

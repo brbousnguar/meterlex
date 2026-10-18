@@ -202,10 +202,15 @@ them with the turns. One machine is enough: the quota belongs to the account.
   Max 5x to Max 20x took the week from 73% to 7% within the same window. Each
   reading carries the plan Claude Code is signed in on (`oauthAccount`'s rate
   limit tier in `~/.claude.json`), and a new plan is fresh news. The screen
-  names the plan, and the week line puts a delimiter where it changed (after
-  the last reading on the old plan, in either window): each side is its own
-  series on its own scale, with its own estimate from tokens, and an hour's
-  readout only reads its own side. Only weeks on the current plan lend a budget
+  names the plan, and the week line names each plan above the plot and cuts
+  the line with a dashed hairline where it changed (after the last reading on
+  the old plan, in either window): each side is its own series on its own
+  scale, with its own estimate from tokens and its own "at this rate"
+  projection (after a day on the new plan), and an hour's readout only reads
+  its own side. A week with a switch says both plans under Past weeks. A
+  change booked for a later day (More → next Claude plan, with the day) is
+  marked ahead as a dotted hairline, the projection stops there, and the first
+  reading on that plan takes over. Only weeks on the current plan lend a budget
   or an average. Within one plan the figure only rises: a lower one, even from
   a session whose own figure just moved, is a session that has fallen behind. Readings
   from collectors older than 0.6.0 carry no plan:

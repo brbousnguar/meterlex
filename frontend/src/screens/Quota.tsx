@@ -18,6 +18,7 @@ function useClock(tz: string) {
     }),
     day: (iso: string) => new Date(iso).toLocaleDateString("en-GB", { timeZone: tz, weekday: "short" }),
     date: (iso: string) => new Date(iso).toLocaleDateString("en-GB", { timeZone: tz, day: "numeric", month: "short" }),
+    dayDate: (iso: string) => new Date(iso).toLocaleDateString("en-GB", { timeZone: tz, weekday: "short", day: "numeric", month: "short" }),
   };
 }
 
@@ -74,7 +75,7 @@ function QuotaView({ q }: { q: QuotaData }) {
         <div className="reading-meta">
           {p && (
             <span className={`pace-chip${tone ? ` ${tone}` : ""}`}>
-              {p.status === "on" ? "on pace" : `${Math.abs(p.delta_pts).toFixed(0)} pts ${p.status} of pace`}
+              {p.status === "on" ? "on pace" : `${Math.abs(p.delta_pts).toFixed(0)} pts ${p.status === "ahead" ? "ahead of" : "behind"} pace`}
             </span>
           )}
           {p?.projected_pct != null && (
@@ -87,8 +88,11 @@ function QuotaView({ q }: { q: QuotaData }) {
             <span className="rank-sub">read {clock.when(q.reading.at)} on <span className="mono">{q.reading.machine}</span></span>
           )}
           {q.plan_change && (
+            <span className="rank-sub">{q.plan_change.from_label} → {q.plan_change.to_label} after {clock.when(q.plan_change.last_at)}</span>
+          )}
+          {q.plan_next && (
             <span className="rank-sub">
-              {q.plan_change.from_label} → {q.plan_change.to_label} this week: last read on {q.plan_change.from_label} {clock.when(q.plan_change.last_at)}, first on {q.plan_change.to_label} {clock.when(q.plan_change.at)}
+              {q.plan_next.plan_label} from {clock.dayDate(q.plan_next.at)}, as booked{Date.parse(q.plan_next.at) <= Date.parse(q.now) ? " · no reading on it yet" : ""}
             </span>
           )}
         </div>
@@ -173,7 +177,8 @@ function QuotaView({ q }: { q: QuotaData }) {
               name: <span>{`from ${clock.date(w.start)}`}</span>,
               value: fmtTok(w.tokens),
               sub: w.final_pct !== null
-                ? `ended at ${w.final_pct.toFixed(0)}%${!w.same_plan && w.plan_label ? ` on ${w.plan_label}` : ""}`
+                ? `ended at ${w.final_pct.toFixed(0)}%${w.switched_from_label ? ` · ${w.switched_from_label} → ${w.plan_label}`
+                  : !w.same_plan && w.plan_label ? ` on ${w.plan_label}` : ""}`
                 : "no quota reading",
               share: pct(w.tokens, pastPeak),
               fill: CLAUDE.fill,
