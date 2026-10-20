@@ -8,6 +8,7 @@ import asyncio
 import logging
 import os
 import re
+from collections import Counter
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -734,6 +735,90 @@ def overview(
         "series": series,
         "model_order": model_order,
         "busiest": busiest if busiest and busiest["tokens"] else None,
+    }
+
+
+# ── one session ───────────────────────────────────────────────────────────────
+
+# A pause between two turns counts as at most this much work, so a session
+# left open overnight does not read as hours of activity.
+ACTIVE_GAP_CAP = 300
+
+
+def _utc_param(name: str, value: Optional[str]) -> Optional[datetime]:
+    """An ISO 8601 query value as the naive UTC that rows are stored in.
+    A value without an offset is taken as UTC already."""
+    if not value:
+        return None
+    try:
+        d = datetime.fromisoformat(value)
+    except ValueError:
+        raise HTTPException(400, f"bad {name} '{value}' (use ISO 8601)")
+    return d.astimezone(timezone.utc).replace(tzinfo=None) if d.tzinfo else d
+
+
+@app.get("/api/sessions/{session_id}/usage")
+def session_usage(
+    session_id: str,
+    frm: Optional[str] = Query(None, alias="from"),
+    to: Optional[str] = None,
+    session: Session = Depends(get_session),
+):
+    """One session's usage, optionally inside [from, to), for Worklex's cost per
+    issue. Subagent turns are stored under the parent session's id, so they are
+    in here; an unknown id answers found: false with zeros so callers can cache it."""
+    start, end = _utc_param("from", frm), _utc_param("to", to)
+    f = [UsageTurn.session_id == session_id]
+    if start:
+        f.append(UsageTurn.ts >= start)
+    if end:
+        f.append(UsageTurn.ts < end)
+    rows = session.exec(select(
+        UsageTurn.source, UsageTurn.machine, UsageTurn.model_id, UsageTurn.ts,
+        UsageTurn.input_tokens, UsageTurn.output_tokens, UsageTurn.cache_read,
+        UsageTurn.cache_write, UsageTurn.total_tokens, UsageTurn.cost_eur, UsageTurn.cost_usd,
+    ).where(*f).order_by(UsageTurn.ts)).all()
+
+    # The most common source and machine name the session; with an empty
+    # window they come from the whole session, so "found" still holds.
+    named = rows or session.exec(
+        select(UsageTurn.source, UsageTurn.machine).where(UsageTurn.session_id == session_id)
+    ).all()
+    sources, hosts = Counter(r[0] for r in named), Counter(r[1] for r in named)
+
+    totals = dict.fromkeys(("input_tokens", "output_tokens", "cache_read", "cache_write", "total_tokens"), 0)
+    cost_eur = cost_usd = 0.0
+    by_model: dict = {}
+    active, prev = 0.0, None
+    for _, _, model, ts, inp, out, cr, cw, tok, eur, usd in rows:
+        for k, v in zip(totals, (inp, out, cr, cw, tok)):
+            totals[k] += int(v or 0)
+        cost_eur += eur or 0.0
+        cost_usd += usd or 0.0
+        m = by_model.setdefault(model, {"turns": 0, "total_tokens": 0, "cost_eur": 0.0, "cost_usd": 0.0})
+        m["turns"] += 1
+        m["total_tokens"] += int(tok or 0)
+        m["cost_eur"] += eur or 0.0
+        m["cost_usd"] += usd or 0.0
+        if prev is not None:
+            active += min((ts - prev).total_seconds(), ACTIVE_GAP_CAP)
+        prev = ts
+
+    for m in by_model.values():
+        m["cost_eur"], m["cost_usd"] = round(m["cost_eur"], 4), round(m["cost_usd"], 4)
+    return {
+        "session_id": session_id,
+        "found": bool(named),
+        "source": sources.most_common(1)[0][0] if sources else None,
+        "machine": hosts.most_common(1)[0][0] if hosts else None,
+        "turns": len(rows),
+        **totals,
+        "cost_eur": round(cost_eur, 4),
+        "cost_usd": round(cost_usd, 4),
+        "by_model": dict(sorted(by_model.items(), key=lambda kv: -kv[1]["cost_eur"])),
+        "first_ts": rows[0][3].isoformat() if rows else None,
+        "last_ts": rows[-1][3].isoformat() if rows else None,
+        "active_seconds": int(active),
     }
 
 
