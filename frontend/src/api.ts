@@ -270,7 +270,8 @@ export interface Quota {
   plan_next: { plan: string; plan_label: string; on: string; at: string } | null;
   /** the window in view, `back` weeks before the live one (0), read to `end`: now, or its reset once passed */
   window: { back: number; start: string; reset: string; end: string; start_local: string; reset_local: string; elapsed_pct: number; days_left: number | null };
-  reading: { used_pct: number; at: string; machine: string } | null;
+  /** `stale`: Claude Code spent `tokens_since` after it and nothing read the quota since (#67) */
+  reading: { used_pct: number; at: string; machine: string; tokens_since: number; stale: boolean } | null;
   used_pct: number | null;
   pace: { delta_pts: number; status: "ahead" | "behind" | "on"; projected_pct: number | null } | null;
   tokens: {

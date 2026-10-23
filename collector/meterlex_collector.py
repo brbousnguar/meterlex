@@ -13,6 +13,7 @@ into what is sent. `run --dry-run` prints exactly what would go.
     python meterlex_collector.py rollup [--apply]
     python meterlex_collector.py install      # launchd on macOS, a Scheduled Task on Windows, a systemd timer on Linux
     python meterlex_collector.py statusline   # Claude Code's status line: records the Claude Max quota
+    python meterlex_collector.py probe        # read the Claude Max quota now, with one tiny headless call
 
 One file, standard library only, Python 3.9+: macOS's own /usr/bin/python3 runs
 it, and so does `uv run meterlex_collector.py …` on Windows.
@@ -38,7 +39,7 @@ from pathlib import Path
 from typing import Iterator, Optional
 from urllib.parse import urlparse
 
-VERSION = "0.6.0"
+VERSION = "0.7.0"
 BATCH = 1000               # turns per POST
 SPOOL_MAX = 500_000        # unsent turns kept on disk before the oldest are dropped
 HOME = Path.home()
@@ -1207,9 +1208,11 @@ def _news(r: dict, kept, prev) -> tuple[bool, bool]:
     return r["used_pct"] > pct and not was_fresh, False
 
 
-def record_quota(readings: list, session_id: Optional[str] = None, now: Optional[float] = None) -> int:
+def record_quota(readings: list, session_id: Optional[str] = None, now: Optional[float] = None,
+                 direct: bool = False) -> int:
     """Append the readings that are news for their window (see _news), and
-    remember what this session painted."""
+    remember what this session painted. A `direct` reading (the probe's) is
+    Anthropic's answer of this moment: always kept, always fresh."""
     now = time.time() if now is None else now
     last_path = config_dir() / "quota-last.json"
     last = _read_json(last_path, {})
@@ -1217,7 +1220,7 @@ def record_quota(readings: list, session_id: Optional[str] = None, now: Optional
     mine = sessions.get(session_id, {}) if session_id else {}
     news = []
     for r in readings:
-        is_news, fresh = _news(r, last.get(r["window"]), mine.get(r["window"]))
+        is_news, fresh = (True, True) if direct else _news(r, last.get(r["window"]), mine.get(r["window"]))
         if is_news:
             news.append(dict(r, fresh=True) if fresh else r)
     seen = {r["window"]: [r["used_pct"], r["resets_at"]] for r in readings}
@@ -1239,6 +1242,7 @@ def record_quota(readings: list, session_id: Optional[str] = None, now: Optional
             known = last.get(r["window"]) or []
             plan = r.get("plan") or (known[2] if len(known) > 2 else None)
             last[r["window"]] = [r["used_pct"], r["resets_at"], plan, bool(r.get("fresh"))]
+        last["read_at"] = int(now)
     if news or remember:
         _write_json(last_path, last)
     return len(news)
@@ -1287,6 +1291,109 @@ def cmd_statusline(stdin=None) -> int:
     except OSError:
         pass
     print(status_text(data if isinstance(data, dict) else {}, readings, now))
+    return 0
+
+
+# ── the quota without a status line (#67) ─────────────────────────────────────
+# The desktop app and the Agent SDK run Claude Code without a status line, so
+# however much they spend, no reading arrives. A headless call reports the same
+# limits in its stream-json `rate_limit_event` (`unifiedWindows.<window>`,
+# utilization 0-1). `run` makes one, on Haiku with no tools, MCP servers,
+# settings or transcript (about 3.6k tokens), when it found Claude turns from
+# the last minutes and nothing was read for PROBE_EVERY_S. Only after real use,
+# so a probe never opens a 5-hour window by itself. `"probe": false` in
+# config.json turns it off on a machine signed in to another account.
+
+PROBE_EVERY_S = 600
+PROBE_RECENT_S = 900        # a turn this recent means a Claude Code session is spending
+PROBE_TIMEOUT_S = 120
+PROBE_ARGS = ["-p", "Reply with the single word ok.", "--model", "haiku",
+              "--output-format", "stream-json", "--verbose", "--tools", "", "--strict-mcp-config",
+              "--setting-sources", "", "--no-session-persistence"]
+# launchd and Task Scheduler start the collector with a bare PATH
+CLAUDE_DIRS = ("/opt/homebrew/bin", "/usr/local/bin", "~/.local/bin", "~/.claude/local",
+               "~/.npm-global/bin", "~/AppData/Roaming/npm")
+
+
+def claude_exe() -> Optional[str]:
+    extra = [os.path.expanduser(d) for d in CLAUDE_DIRS]
+    return shutil.which("claude", path=os.pathsep.join([os.environ.get("PATH", ""), *extra]))
+
+
+def probe_readings(stream: str, now: float, plan: Optional[str] = None) -> list:
+    """The windows in a headless call's rate_limit_event, as readings."""
+    found = {}
+    for line in stream.splitlines():
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(event, dict) or event.get("type") != "rate_limit_event":
+            continue
+        info = event.get("rate_limit_info")
+        if not isinstance(info, dict):
+            continue
+        windows = info.get("unifiedWindows")
+        if not isinstance(windows, dict) or not windows:
+            windows = {info.get("rateLimitType"): info}       # older Claude Code: the binding window only
+        for window, w in windows.items():
+            if window not in ("five_hour", "seven_day") or not isinstance(w, dict):
+                continue
+            try:
+                used, resets = float(w["utilization"]), float(w["resetsAt"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            found[window] = {"window": window, "used_pct": round(used * 100, 1), "resets_at": int(resets),
+                             "ts": datetime.fromtimestamp(now, tz=timezone.utc).isoformat()}
+            if plan:
+                found[window]["plan"] = plan
+    return list(found.values())
+
+
+def probe_quota(now: Optional[float] = None) -> tuple[int, Optional[str]]:
+    """One headless call; its readings are kept. (readings kept, error)."""
+    exe = claude_exe()
+    if not exe:
+        return 0, "claude not found"
+    try:
+        done = subprocess.run([exe, *PROBE_ARGS], capture_output=True, text=True, timeout=PROBE_TIMEOUT_S,
+                              stdin=subprocess.DEVNULL, cwd=str(HOME))
+    except (OSError, subprocess.SubprocessError) as exc:
+        return 0, f"claude did not answer ({exc.__class__.__name__})"
+    now = time.time() if now is None else now
+    readings = probe_readings(done.stdout or "", now, claude_plan())
+    if not readings:
+        return 0, f"no rate_limit_event (exit {done.returncode})"
+    return record_quota(readings, now=now, direct=True), None
+
+
+def _epoch(ts) -> float:
+    try:
+        dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+    except ValueError:
+        return 0.0
+    return (dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)).timestamp()
+
+
+def probe_due(cfg: dict, state: dict, turns: list, now: float) -> bool:
+    if cfg.get("probe") is False:
+        return False
+    spent = [_epoch(t.get("ts")) for t in turns
+             if t.get("source") == "claude-code" and str(t.get("model_id", "")).startswith("claude-")]
+    if not spent or now - max(spent) > PROBE_RECENT_S:
+        return False
+    read_at = _read_json(config_dir() / "quota-last.json", {}).get("read_at", 0)
+    return now - max(read_at, state.get("probed_at", 0)) >= PROBE_EVERY_S
+
+
+def cmd_probe() -> int:
+    kept, error = probe_quota()
+    if error:
+        print(f"quota probe: {error}", file=sys.stderr)
+        return 1
+    last = _read_json(config_dir() / "quota-last.json", {})
+    print(", ".join(f"{w} {last[w][0]:.0f}%" for w in ("seven_day", "five_hour") if isinstance(last.get(w), list))
+          + f" · {kept} reading(s) kept; the next `run` sends them")
     return 0
 
 
@@ -1373,6 +1480,12 @@ def cmd_run(cfg: dict, dry_run: bool = False, full: bool = False, reattribute: b
     state["last_run"] = _now()
     _write_json(state_path, state)
     sent, error = spool_flush(cfg)
+    now = time.time()
+    if probe_due(cfg, state, turns, now):
+        state["probed_at"] = int(now)     # also after a failure: one try per PROBE_EVERY_S
+        _, state["probe_error"] = probe_quota()
+        if state["probe_error"]:
+            print(f"quota probe: {state['probe_error']}", file=sys.stderr)
     quota_sent, quota_error = quota_flush(cfg, state)
     error = error or quota_error
     state["last_sent"], state["last_error"] = sent, error
@@ -1424,8 +1537,14 @@ def cmd_status(cfg: dict) -> int:
             print(f"  {name:<12} {p} {'' if p.exists() else '(absent)'}")
     print(f"  files tracked {len(state.get('files', {}))}, waiting to send {spooled}")
     last_quota = _read_json(config_dir() / "quota-last.json", {})
-    print(f"  quota    " + (", ".join(f"{w} {v[0]:.0f}%" for w, v in last_quota.items())
-                            or "no reading yet (statusLine → `statusline`)"))
+    print(f"  quota    " + (", ".join(f"{w} {v[0]:.0f}%" for w, v in last_quota.items()
+                                      if w in ("five_hour", "seven_day") and isinstance(v, list))
+                            or "no reading yet (statusLine → `statusline`, or `probe`)"))
+    if last_quota.get("read_at"):
+        print(f"  read     {datetime.fromtimestamp(last_quota['read_at'], tz=timezone.utc).isoformat()}")
+    print(f"  probe    " + ("off (config.json)" if cfg.get("probe") is False else
+                            f"{claude_exe() or 'claude not found'}, last {state.get('probed_at', 'never')}"
+                            + (f", error {state['probe_error']}" if state.get("probe_error") else "")))
     print(f"  last run {state.get('last_run', 'never')}, sent {state.get('last_sent', 0)}, "
           f"error {state.get('last_error') or 'none'}")
     return 0
@@ -1533,10 +1652,13 @@ def main(argv=None) -> int:
                                        "a systemd user timer on Linux")
     i.add_argument("--every", type=int, default=300)
     sub.add_parser("statusline", help="Claude Code's status line: record the Claude Max quota, print one line")
+    sub.add_parser("probe", help="read the Claude Max quota now with one tiny headless Claude call; `run` sends it")
     args = ap.parse_args(argv)
 
     if args.cmd == "statusline":
         return cmd_statusline()
+    if args.cmd == "probe":
+        return cmd_probe()
 
     if args.cmd == "setup":
         return cmd_setup(args)

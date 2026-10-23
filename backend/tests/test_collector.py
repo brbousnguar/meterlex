@@ -568,3 +568,83 @@ def test_the_plan_comes_from_claude_code_s_own_config(tmp_path, monkeypatch):
         "organizationRateLimitTier": "default_claude_max_20x", "userRateLimitTier": None}}))
     assert mc.claude_plan() == "default_claude_max_20x"
     assert mc.quota_readings(STATUS, 1_000_000, "default_claude_max_20x")[0]["plan"] == "default_claude_max_20x"
+
+
+# ── the quota without a status line: a headless probe (#67) ───────────────────
+
+# a real `claude -p --output-format stream-json --verbose` event (Claude Code 2.1.308)
+RATE_EVENT = {"type": "rate_limit_event", "rate_limit_info": {
+    "status": "allowed_warning", "resetsAt": 1_000_000 + 3 * 86400, "rateLimitType": "seven_day", "utilization": 0.88,
+    "overageStatus": "rejected", "isUsingOverage": False, "surpassedThreshold": 0.75,
+    "unifiedWindows": {"five_hour": {"utilization": 0.29, "resetsAt": 1_000_000 + 7200},
+                       "seven_day": {"utilization": 0.88, "resetsAt": 1_000_000 + 3 * 86400}}},
+    "uuid": "u", "session_id": "s"}
+STREAM = "\n".join([json.dumps({"type": "system", "subtype": "init"}), "not json",
+                    json.dumps(RATE_EVENT), json.dumps({"type": "result", "subtype": "success"})])
+
+
+def test_a_probe_reads_both_windows_from_the_rate_limit_event():
+    got = {r["window"]: r for r in mc.probe_readings(STREAM, 1_000_000, "default_claude_max_20x")}
+    assert (got["seven_day"]["used_pct"], got["seven_day"]["resets_at"]) == (88.0, 1_000_000 + 3 * 86400)
+    assert got["five_hour"]["used_pct"] == 29.0 and got["five_hour"]["plan"] == "default_claude_max_20x"
+    older = {"type": "rate_limit_event", "rate_limit_info": {
+        "status": "allowed", "rateLimitType": "five_hour", "utilization": 0.4, "resetsAt": 1_000_000 + 60}}
+    assert [(r["window"], r["used_pct"]) for r in mc.probe_readings(json.dumps(older), 1_000_000)] == [("five_hour", 40.0)]
+    overage = {"type": "rate_limit_event", "rate_limit_info": {"rateLimitType": "overage", "utilization": 1}}
+    assert mc.probe_readings(json.dumps(overage), 1_000_000) == [] and mc.probe_readings("", 1_000_000) == []
+
+
+def test_a_probe_reading_is_always_kept_and_fresh(tmp_path, monkeypatch):
+    monkeypatch.setenv("METERLEX_HOME", str(tmp_path))
+    _paint("a", 81, "max_20x")                                # a status line, then the desktop app only
+    readings = mc.probe_readings(STREAM, 1_000_000 + 60, "max_20x")
+    assert mc.record_quota(readings, now=1_000_000 + 60, direct=True) == 2
+    assert mc.record_quota(readings, now=1_000_000 + 700, direct=True) == 2     # unchanged, still a time point
+    assert [(r["used_pct"], r.get("fresh")) for r in _weeks(tmp_path)] == [(81, None), (88.0, True), (88.0, True)]
+    assert json.loads((tmp_path / "quota-last.json").read_text())["read_at"] == 1_000_000 + 700
+
+
+def _turn(model="claude-opus-5-5", ago=60, now=1_000_000.0):
+    ts = mc.datetime.fromtimestamp(now - ago, tz=mc.timezone.utc).replace(tzinfo=None).isoformat()
+    return {"source": "claude-code", "model_id": model, "ts": ts}
+
+
+def test_a_probe_runs_only_after_claude_turns_and_not_twice_in_ten_minutes(tmp_path, monkeypatch):
+    monkeypatch.setenv("METERLEX_HOME", str(tmp_path))
+    now, cfg = 1_000_000.0, {"machine": "m"}
+    assert mc.probe_due(cfg, {}, [_turn()], now)
+    assert not mc.probe_due(cfg, {}, [], now)                                  # no use, no probe
+    assert not mc.probe_due(cfg, {}, [_turn("qwen3.6:35b")], now)             # a local model on claude-code
+    assert not mc.probe_due(cfg, {}, [_turn(ago=3600)], now)                  # `run --full`: old turns
+    assert not mc.probe_due(cfg, {"probed_at": now - 300}, [_turn()], now)
+    assert not mc.probe_due({"probe": False}, {}, [_turn()], now)
+    (tmp_path / "quota-last.json").write_text(json.dumps({"read_at": now - 120}))  # a status line just read it
+    assert not mc.probe_due(cfg, {}, [_turn()], now)
+    assert mc.probe_due(cfg, {"probed_at": now - 900}, [_turn()], now + 600)
+
+
+def test_run_probes_and_sends_the_readings_in_the_same_pass(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    monkeypatch.setenv("METERLEX_HOME", str(home))
+    cfg = _config(tmp_path, hub="http://hub", key="k")
+    calls, sent = [], []
+
+    class Done:
+        returncode, stdout = 0, STREAM
+
+    def fake_run(args, **kw):
+        calls.append(args)
+        return Done()
+
+    turn_now = mc._epoch("2026-09-15T10:00:00Z") + 120                         # claude_line's turn, 2 min old
+    monkeypatch.setattr(mc.time, "time", lambda: turn_now)
+    monkeypatch.setattr(mc, "claude_exe", lambda: "/bin/claude")
+    monkeypatch.setattr(mc.subprocess, "run", fake_run)
+    monkeypatch.setattr(mc, "post", lambda cfg, batch: {})
+    monkeypatch.setattr(mc, "_hub", lambda cfg, path, body=None: sent.append(body) or {})
+    assert mc.cmd_run(cfg) == 0
+    assert len(calls) == 1 and "--no-session-persistence" in calls[0] and calls[0][calls[0].index("--tools") + 1] == ""
+    assert sorted(r["window"] for r in sent[0]["quota"]) == ["five_hour", "seven_day"]
+    assert all(r["fresh"] for r in sent[0]["quota"])
+    write_jsonl(Path(cfg["paths"]["claude_code"]) / "p" / "t.jsonl", [claude_line("u2", 1, msg_id="msg_2")])
+    assert mc.cmd_run(cfg) == 0 and len(calls) == 1                           # read a moment ago: no second call

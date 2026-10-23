@@ -4,7 +4,7 @@ import Bars, { type BarPoint } from "../components/Bars";
 import { RankRows } from "../components/charts";
 import WeekLine from "../components/WeekLine";
 import WindowLine from "../components/WindowLine";
-import { fmtInt, fmtTok, folderLabel, harness, pct } from "../lib";
+import { ago, fmtInt, fmtTok, folderLabel, harness, pct } from "../lib";
 
 /* The Claude Max weekly quota. Anthropic meters it as a percentage with a reset
    time; the tokens come from Claude Code's own turns. The percentage is the
@@ -107,6 +107,7 @@ function WeekView({ q, onBack }: { q: QuotaData; onBack: (back: number) => void 
         </div>
         <Meter used={used} elapsed={q.window.elapsed_pct} projected={p?.projected_pct ?? null} anchored={q.anchored} live={live} />
         <div className="reading-meta">
+          {q.reading?.stale && <span className="pace-chip over">stale · read {ago(q.reading.at).text}</span>}
           {p && (
             <span className={`pace-chip${tone ? ` ${tone}` : ""}`}>
               {p.status === "on" ? "on pace" : `${Math.abs(p.delta_pts).toFixed(0)} pts ${p.status === "ahead" ? "ahead of" : "behind"} pace`}
@@ -116,7 +117,10 @@ function WeekView({ q, onBack }: { q: QuotaData; onBack: (back: number) => void 
             <span className="rank-sub">at this rate, {p.projected_pct.toFixed(0)}% by the reset</span>
           )}
           {q.reading && (
-            <span className="rank-sub">{live ? "read" : "last read"} {clock.when(q.reading.at)} on <span className="mono">{q.reading.machine}</span></span>
+            <span className="rank-sub">
+              {live ? "read" : "last read"} {clock.when(q.reading.at)} on <span className="mono">{q.reading.machine}</span>
+              {q.reading.stale && <>, {fmtTok(q.reading.tokens_since)} tokens since</>}
+            </span>
           )}
           {q.plan_change && (
             <span className="rank-sub">{q.plan_change.from_label} → {q.plan_change.to_label} after {clock.when(q.plan_change.last_at)}</span>
@@ -253,8 +257,9 @@ function WeekView({ q, onBack }: { q: QuotaData; onBack: (back: number) => void 
       </div>
 
       <p className="rank-sub quota-note">
-        The percentage is Anthropic's own reading, passed by Claude Code to its status line, and covers
-        claude.ai and the desktop app too. Tokens are Claude Code's only, so the budget in tokens is an
+        The percentage is Anthropic's own reading, and covers claude.ai and the desktop app too. Claude
+        Code's status line passes it on; the desktop app has none, so while Claude Code runs there the
+        collector asks for it with one tiny Haiku call, at most every ten minutes. Tokens are Claude Code's only, so the budget in tokens is an
         estimate that moves with the model mix: a token of a dearer model takes more of the quota, and
         cache reads count for little. A plan change keeps the reset but rescales the percentage, so the
         budget and the past weeks' average only use readings on the current plan, and after a switch
