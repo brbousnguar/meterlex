@@ -1,0 +1,2 @@
+### Fixed
+- Quota stays current while Claude Code runs in the desktop app or the Agent SDK, which paint no status line. When the collector sees Claude turns and nothing has been read for 10 minutes, it reads both windows from one tiny headless Haiku call (`rate_limit_event`, about 3.6k tokens). It also gains a `probe` command. The Quota screen marks a reading that is over 30 minutes old with tokens spent after it as stale. Collector 0.7.0 (#67)

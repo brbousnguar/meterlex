@@ -354,3 +354,22 @@ def test_between_five_hour_windows_nothing_is_open_and_the_last_ones_are_listed(
     # a past week has no 5-hour window, and a hub without any reading none at all
     assert quota.view(session, FIVE_RESET + timedelta(days=8), PARIS, back=1)["five_hour"] is None
     assert quota.view(session, FIVE_START - timedelta(days=2), PARIS)["five_hour"] is None
+
+
+def test_a_reading_that_tokens_went_past_is_flagged_stale(session):
+    # the desktop app paints no status line: 16 h of use and no reading (#67)
+    m = _machine(session)
+    read = START + timedelta(days=2)
+    ingest.ingest_quota(session, m, [_reading(read, 40.0)])
+    _turn(session, read + timedelta(minutes=10), 500)
+    r = quota.view(session, read + timedelta(minutes=20), PARIS)["reading"]
+    assert (r["tokens_since"], r["stale"]) == (500, False)           # read a moment ago
+    r = quota.view(session, read + timedelta(hours=16), PARIS)["reading"]
+    assert (r["tokens_since"], r["stale"]) == (500, True)
+    ingest.ingest_quota(session, m, [_reading(read + timedelta(hours=16), 41.0)])
+    r = quota.view(session, read + timedelta(hours=16, minutes=1), PARIS)["reading"]
+    assert (r["tokens_since"], r["stale"]) == (0, False)
+    quiet = quota.view(session, read + timedelta(days=1, hours=16), PARIS)["reading"]
+    assert not quiet["stale"]                                         # nothing spent since: still the figure
+    past = quota.view(session, read + timedelta(days=8), PARIS, back=1)["reading"]
+    assert (past["tokens_since"], past["stale"]) == (0, False)

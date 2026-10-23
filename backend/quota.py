@@ -36,6 +36,7 @@ FIVE_WINDOWS = 6                # the 5-hour windows listed, newest first
 MIN_PCT_FOR_BUDGET = 3.0        # below this a budget is mostly rounding noise
 SAME_RESET = timedelta(hours=1) # resets_at can move by seconds between readings
 PACE_BAND = 2.0                 # points either side of the pace that read as "on pace"
+STALE_AFTER = timedelta(minutes=30)  # a reading this old with Claude tokens after it is not the figure now
 
 
 def _iso(dt: Optional[datetime]) -> Optional[str]:
@@ -402,6 +403,8 @@ def view(session: Session, now: datetime, tz: ZoneInfo, back: int = 0) -> dict:
             "projected_pct": round(projected, 1) if projected is not None else None,
         }
 
+    unread = tokens_between(reading.ts, end) if reading and live else 0
+
     left = None
     days_left = (reset - end) / DAY if anchored else None
     if budget:
@@ -467,7 +470,11 @@ def view(session: Session, now: datetime, tz: ZoneInfo, back: int = 0) -> dict:
             "elapsed_pct": round(elapsed * 100, 1),
             "days_left": round(days_left, 2) if days_left is not None else None,
         },
-        "reading": {"used_pct": reading.used_pct, "at": _iso(reading.ts), "machine": reading.machine} if reading else None,
+        "reading": {
+            "used_pct": reading.used_pct, "at": _iso(reading.ts), "machine": reading.machine,
+            # Claude Code spent after it and nothing read it since (#67): the page says so
+            "tokens_since": unread, "stale": live and unread > 0 and end - reading.ts > STALE_AFTER,
+        } if reading else None,
         "used_pct": used_pct,
         "pace": pace,
         "tokens": {

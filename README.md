@@ -189,6 +189,20 @@ It prints one line (`Opus 5.5 · Server · week 41% · 6 pts ahead · 5h 12%`),
 appends readings to `quota.jsonl` in the collector's folder, and `run` sends
 them with the turns. One machine is enough: the quota belongs to the account.
 
+- **No status line, so the collector asks.** The desktop app and the Agent SDK
+  run Claude Code without a status line, so they send no reading however much
+  they spend (2026-10-23: the page held 81% for 16 hours while the account
+  reached 88%). A headless `claude -p --output-format stream-json` call reports
+  the same limits in its `rate_limit_event` (`unifiedWindows.five_hour` and
+  `seven_day`). `run` makes one such call when it finds Claude turns from the
+  last 15 minutes and nothing has been read for 10. The call uses Haiku with no
+  tools, MCP servers, settings or transcript, about 3.6k tokens, and its
+  readings are fresh. It only runs after real use, so it never opens a 5-hour
+  window by itself. `meterlex_collector.py probe` makes one call on demand.
+  `"probe": false` in `config.json` turns it off on a machine signed in to
+  another account. When a reading is over 30 minutes old and Claude Code spent
+  tokens after it, the Quota screen marks it stale and shows the tokens since.
+
 - **A lower figure counts only when it is fresh.** Every open Claude Code
   session repaints its status line with the last figure it was given, so an
   idle session from days ago still shows an old, lower one. The collector
@@ -353,7 +367,7 @@ paths.
 | `GET` | `/api/machines` | Each machine: label policy, last report, collector version, turns and tokens |
 | `GET` | `/api/config` | What the UI needs about this deployment: the rate card's address and the period time zone |
 | `GET` | `/api/overview` | Everything one screen needs for a period (`?period=weekly\|monthly\|yearly`, `?ref=`, `?machine=`, `?source=`): totals with the token split, the same-length period before, by machine, harness, model, project (with its top branches) and origin, and a bucketed series with the empty buckets kept |
-| `GET` | `/api/quota` | The Claude Max week: window, used % against elapsed %, pace and projection, tokens, the estimated budget and what is left, per-day bars, tokens per hour of the window, past weeks, weekday × hour, top models, folders and machines, and `five_hour`: the open 5-hour window (used, elapsed, minutes left, pace and projection, when it was capped, its readings, tokens per ten minutes, tokens, budget and what is left) and the last six windows. `?back=N` (0–8) reads the window N weeks earlier to its reset, without pace, projection, 5-hour window or booked plan |
+| `GET` | `/api/quota` | The Claude Max week: window, used % against elapsed %, pace and projection, tokens, the estimated budget and what is left, per-day bars, tokens per hour of the window, past weeks, weekday × hour, top models, folders and machines, and `five_hour`: the open 5-hour window (used, elapsed, minutes left, pace and projection, when it was capped, its readings, tokens per ten minutes, tokens, budget and what is left) and the last six windows. `reading` carries `tokens_since` and `stale` (over 30 minutes old with Claude Code tokens after it). `?back=N` (0–8) reads the window N weeks earlier to its reset, without pace, projection, 5-hour window or booked plan |
 | `GET` | `/api/sessions/{session_id}/usage` | One session's turns, tokens (input, output, cache), cost in EUR and USD, the same per model, first and last turn, and active seconds (gaps between turns, each capped at 5 minutes). `?from=` / `?to=` (ISO 8601, UTC without an offset) limit it to `[from, to)`. Subagent turns are stored under the parent session's id, so they are included. An unknown id answers `found: false` with zeros. Worklex uses it for the cost of each issue |
 | `GET` | `/api/summary` | Per-tool cost summary with subscription comparison (`?machine=` filters) |
 | `GET` | `/api/projects/mine` | The project labels stored for the calling machine (collector key) |
