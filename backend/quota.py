@@ -403,7 +403,13 @@ def view(session: Session, now: datetime, tz: ZoneInfo, back: int = 0) -> dict:
             "projected_pct": round(projected, 1) if projected is not None else None,
         }
 
-    unread = tokens_between(reading.ts, end) if reading and live else 0
+    # a figure the status line keeps repeating is still current: stamp it with
+    # the latest reading that confirms it, not the first one that reached it
+    confirmed = max((r.ts for r in week_readings
+                     if reading and _in_window(r, reset) and r.ts >= reading.ts
+                     and r.used_pct == reading.used_pct and (not r.plan or r.plan == reading.plan)),
+                    default=reading.ts if reading else None)
+    unread = tokens_between(confirmed, end) if reading and live else 0
 
     left = None
     days_left = (reset - end) / DAY if anchored else None
@@ -471,9 +477,9 @@ def view(session: Session, now: datetime, tz: ZoneInfo, back: int = 0) -> dict:
             "days_left": round(days_left, 2) if days_left is not None else None,
         },
         "reading": {
-            "used_pct": reading.used_pct, "at": _iso(reading.ts), "machine": reading.machine,
+            "used_pct": reading.used_pct, "at": _iso(confirmed), "machine": reading.machine,
             # Claude Code spent after it and nothing read it since (#67): the page says so
-            "tokens_since": unread, "stale": live and unread > 0 and end - reading.ts > STALE_AFTER,
+            "tokens_since": unread, "stale": live and unread > 0 and end - confirmed > STALE_AFTER,
         } if reading else None,
         "used_pct": used_pct,
         "pace": pace,

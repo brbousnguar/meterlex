@@ -373,3 +373,14 @@ def test_a_reading_that_tokens_went_past_is_flagged_stale(session):
     assert not quiet["stale"]                                         # nothing spent since: still the figure
     past = quota.view(session, read + timedelta(days=8), PARIS, back=1)["reading"]
     assert (past["tokens_since"], past["stale"]) == (0, False)
+
+
+def test_a_figure_the_status_line_keeps_repeating_is_not_stale(session):
+    m = _machine(session)
+    read = START + timedelta(days=2)
+    ingest.ingest_quota(session, m, [_reading(read, 97.0)])
+    _turn(session, read + timedelta(minutes=10), 500)
+    again = read + timedelta(minutes=40)
+    ingest.ingest_quota(session, m, [_reading(again, 97.0)])
+    r = quota.view(session, again + timedelta(minutes=1), PARIS)["reading"]
+    assert (r["at"], r["tokens_since"], r["stale"]) == (quota._iso(again), 0, False)
