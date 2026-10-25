@@ -10,7 +10,7 @@ import os
 import re
 from collections import Counter
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo
 from fastapi import FastAPI, Depends, Header, HTTPException, Query
@@ -852,8 +852,17 @@ def api_credits(provider: str = Query("elevenlabs"), session: Session = Depends(
 @app.put("/api/credits/openai/balance")
 def put_openai_balance(payload: dict, session: Session = Depends(get_session)):
     """The balance shown on the OpenAI billing page now, in dollars ({"usd": 12.34}); null clears it.
-    OpenAI has no API for it, so what was spent since comes off this figure."""
+    OpenAI has no API for it, so what was spent since comes off this figure. An optional
+    "topped_up": "YYYY-MM-DD", the day of the last top-up, gives the meter its whole (#79)."""
     usd = payload.get("usd")
+    topped_up = payload.get("topped_up") or None
+    if topped_up is not None:
+        try:
+            topped_up = date.fromisoformat(str(topped_up))
+        except ValueError:
+            raise HTTPException(400, "topped_up must be a day, YYYY-MM-DD")
+        if topped_up > datetime.utcnow().date():
+            raise HTTPException(400, "topped_up cannot be in the future")
     if usd is not None:
         try:
             usd = float(usd)
@@ -861,7 +870,7 @@ def put_openai_balance(payload: dict, session: Session = Depends(get_session)):
             raise HTTPException(400, "usd must be a number of dollars, or null")
         if not 0 <= usd <= 1_000_000:
             raise HTTPException(400, "usd must be between 0 and 1,000,000")
-    prepaid.save_anchor(session, usd, datetime.utcnow())
+    prepaid.save_anchor(session, usd, datetime.utcnow(), topped_up)
     return prepaid.view(session, datetime.utcnow(), LOCAL_TZ, "openai")
 
 

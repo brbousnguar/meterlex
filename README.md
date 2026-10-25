@@ -326,6 +326,10 @@ OpenAI) shows one at a time.
   Settings → Organization → Admin keys; a project key answers 403). Type the
   balance from the billing page on the OpenAI view: what was spent from then on
   comes off it. Type it again after a top-up. The costs can lag a few hours.
+  With it, give the day of the last top-up (Billing history): the bar then
+  measures what was spent since that top-up out of what the account held after it.
+
+On the Credits tab, a meter that is 90% or more used turns red.
 
 ```bash
 python3 collector/meterlex_collector.py credits --openrouter-env ~/.brb-git/.env --openai-env ~/.config/openai-admin.env
@@ -444,7 +448,7 @@ paths.
 | `GET` | `/api/quota` | The Claude Max week: window, used % against elapsed %, pace and projection, tokens, the estimated budget and what is left, per-day bars, tokens per hour of the window, past weeks, weekday × hour, top models, folders and machines, and `five_hour`: the open 5-hour window (used, elapsed, minutes left, pace and projection, when it was capped, its readings, tokens per ten minutes, tokens, budget and what is left) and the last six windows. `reading` carries `tokens_since` and `stale` (over 30 minutes old with Claude Code tokens after it). `?back=N` (0–8) reads the window N weeks earlier to its reset, without pace, projection, 5-hour window or booked plan |
 | `GET` | `/api/credits` | `?provider=elevenlabs`: the metered month: the latest reading and whether it is stale, the plan, the window from the reset before to the reset ahead, used / limit / left and %, pace and projection with the day the credits run out, what a day can spend to last to the reset, the last seven days' average, and credits per UTC day. `reading: null` before the first one |
 | `GET` | `/api/credits?provider=openrouter\|openai` | A prepaid account (`kind: "prepaid"`), in dollars: the latest reading and whether it is stale, bought / used (OpenRouter) or the balance typed and what was spent since (OpenAI), what is left, the rate a day over the last seven days, how many days it lasts and when it runs out, what went today / in 7 days / this month, and 30 UTC days of spend |
-| `PUT` | `/api/credits/openai/balance` | `{"usd": 12.34}`: the balance on the OpenAI billing page now (`null` clears it); returns the OpenAI view |
+| `PUT` | `/api/credits/openai/balance` | `{"usd": 12.34, "topped_up": "2026-10-07"}`: the balance on the OpenAI billing page now (`null` clears it) and, optionally, the day of the last top-up; returns the OpenAI view |
 | `GET` | `/api/sessions/{session_id}/usage` | One session's turns, tokens (input, output, cache), cost in EUR and USD, the same per model, first and last turn, and active seconds (gaps between turns, each capped at 5 minutes). `?from=` / `?to=` (ISO 8601, UTC without an offset) limit it to `[from, to)`. Subagent turns are stored under the parent session's id, so they are included. An unknown id answers `found: false` with zeros. Worklex uses it for the cost of each issue |
 | `GET` | `/api/summary` | Per-tool cost summary with subscription comparison (`?machine=` filters) |
 | `GET` | `/api/projects/mine` | The project labels stored for the calling machine (collector key) |

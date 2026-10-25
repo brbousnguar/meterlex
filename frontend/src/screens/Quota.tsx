@@ -354,13 +354,13 @@ function OpenWindow({ o, now, tz, hhmm }: { o: FiveHourOpen; now: string; tz: st
 }
 
 /** One track for the week: the fill is what is used, the tick is where the week is. */
-export function Meter({ used, elapsed, projected, anchored, live, span = "week" }: { used: number | null; elapsed: number; projected: number | null; anchored: boolean; live: boolean; span?: string }) {
+export function Meter({ used, elapsed, projected, anchored, live, span = "week", alarm = false }: { used: number | null; elapsed: number; projected: number | null; anchored: boolean; live: boolean; span?: string; alarm?: boolean }) {
   const u = Math.min(100, used ?? 0);
   const ahead = used !== null && used > elapsed;
   return (
     <div className="quota-meter" role="img"
          aria-label={anchored ? `${(used ?? 0).toFixed(0)}% used, ${elapsed.toFixed(0)}% of the ${span} gone` : "no reading yet"}>
-      <i className="quota-fill" style={{ width: `${u}%` }} />
+      <i className={`quota-fill${alarm ? " alarm" : ""}`} style={{ width: `${u}%` }} />
       {ahead && <i className="quota-over" style={{ left: `${elapsed}%`, width: `${u - elapsed}%` }} />}
       {projected !== null && projected > u && (
         <i className="quota-proj" style={{ left: `${u}%`, width: `${Math.min(100, projected) - u}%` }} />

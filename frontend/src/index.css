@@ -664,6 +664,7 @@ a.linkout::after { content: "↗"; margin-left: auto; color: var(--accent-ink); 
 .quota-meter { position: relative; height: 22px; background: var(--surface-2); border: 1px solid var(--rule); margin: 0 0 26px; }
 .quota-meter i { position: absolute; top: 0; bottom: 0; display: block; }
 .quota-fill { left: 0; background: var(--meter, var(--h-claude)); }
+.quota-fill.alarm { background: var(--over); }   /* 90% or more gone (#79) */
 .quota-over { background: var(--over); }
 .quota-proj {
   background: repeating-linear-gradient(135deg, var(--meter, var(--h-claude)) 0 2px, transparent 2px 7px);
