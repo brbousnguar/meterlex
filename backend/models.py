@@ -119,3 +119,32 @@ class Setting(SQLModel, table=True):
 
     key: str = Field(primary_key=True)
     value: str = ""
+
+
+class CreditReading(SQLModel, table=True):
+    """A metered plan's monthly credits as its own API reports them (ElevenLabs:
+    characters used of the month's limit, and when the count resets)."""
+    __tablename__ = "credit_readings"
+    __table_args__ = (
+        UniqueConstraint("provider", "ts", "machine", name="uq_credit_reading"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    provider: str = Field(index=True)   # elevenlabs
+    used: int = 0
+    limit: int = 0
+    resets_at: datetime                 # naive UTC
+    ts: datetime = Field(index=True)    # when it was read, naive UTC
+    machine: str = Field(default=HUB_MACHINE)
+    plan: Optional[str] = None          # the provider's tier, e.g. creator
+
+
+class CreditDay(SQLModel, table=True):
+    """Credits used on one UTC day, as the provider's usage stats give it; a
+    later read of the same day replaces the earlier one."""
+    __tablename__ = "credit_days"
+
+    provider: str = Field(primary_key=True)
+    day: str = Field(primary_key=True)  # YYYY-MM-DD, UTC
+    used: int = 0
+    updated_at: datetime = Field(default_factory=datetime.utcnow)

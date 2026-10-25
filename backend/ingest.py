@@ -15,7 +15,7 @@ from typing import Optional
 from sqlmodel import Session, select
 
 from database import engine, create_db
-from models import Machine, QuotaReading, UsageTurn
+from models import CreditDay, CreditReading, Machine, QuotaReading, UsageTurn
 import pricing
 
 log = logging.getLogger("meterlex.ingest")
@@ -378,6 +378,67 @@ def ingest_quota(session: Session, machine: Machine, readings: list) -> dict:
             continue
         session.add(QuotaReading(window=window, used_pct=used, resets_at=resets, ts=ts, machine=machine.name,
                                  plan=str(plan) if plan else None, fresh=raw.get("fresh") is True))
+        session.flush()
+        counts["inserted"] += 1
+    session.commit()
+    return counts
+
+
+CREDIT_PROVIDERS = {"elevenlabs"}
+_DAY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+MAX_CREDITS_PER_BATCH = 50
+MAX_CREDIT_DAYS = 400
+
+
+def _count(value) -> int:
+    n = int(value)
+    if not 0 <= n <= 10**12:
+        raise ValueError(n)
+    return n
+
+
+def ingest_credits(session: Session, machine: Machine, readings: list) -> dict:
+    """Store credit readings (one seen before, same provider, time and machine,
+    is skipped) and their daily figures (the latest read of a day wins)."""
+    counts = {"inserted": 0, "unchanged": 0, "rejected": 0, "days": 0}
+    now = datetime.utcnow()
+    for raw in readings:
+        try:
+            provider = str(raw["provider"])
+            if provider not in CREDIT_PROVIDERS:
+                raise ValueError(provider)
+            used, limit = _count(raw["used"]), _count(raw["limit"])
+            resets = datetime.fromtimestamp(float(raw["resets_at"]), tz=timezone.utc).replace(tzinfo=None)
+            ts = datetime.fromisoformat(str(raw["ts"]).replace("Z", "+00:00"))
+            ts = ts if ts.tzinfo is None else ts.astimezone(timezone.utc).replace(tzinfo=None)
+            plan = raw.get("plan")
+            if plan is not None and not _PLAN.match(str(plan)):
+                raise ValueError(plan)
+            days = raw.get("days") or []
+            if not isinstance(days, list) or len(days) > MAX_CREDIT_DAYS:
+                raise ValueError("days")
+            days = [(str(d["day"]), _count(d["used"])) for d in days]
+            if any(not _DAY.match(day) for day, _ in days):
+                raise ValueError("day")
+        except (KeyError, TypeError, ValueError, OverflowError, OSError):
+            counts["rejected"] += 1
+            continue
+        for day, n in days:
+            row = session.get(CreditDay, (provider, day))
+            if row is None:
+                session.add(CreditDay(provider=provider, day=day, used=n, updated_at=now))
+            elif row.used != n:
+                row.used, row.updated_at = n, now
+                session.add(row)
+            counts["days"] += 1
+        seen = session.exec(select(CreditReading).where(
+            CreditReading.provider == provider, CreditReading.ts == ts, CreditReading.machine == machine.name,
+        )).first()
+        if seen is not None:
+            counts["unchanged"] += 1
+            continue
+        session.add(CreditReading(provider=provider, used=used, limit=limit, resets_at=resets, ts=ts,
+                                  machine=machine.name, plan=str(plan) if plan else None))
         session.flush()
         counts["inserted"] += 1
     session.commit()

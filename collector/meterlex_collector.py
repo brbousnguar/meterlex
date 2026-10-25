@@ -14,6 +14,7 @@ into what is sent. `run --dry-run` prints exactly what would go.
     python meterlex_collector.py install      # launchd on macOS, a Scheduled Task on Windows, a systemd timer on Linux
     python meterlex_collector.py statusline   # Claude Code's status line: records the Claude Max quota
     python meterlex_collector.py probe        # read the Claude Max quota now, with one tiny headless call
+    python meterlex_collector.py credits [--elevenlabs-env FILE]   # read the ElevenLabs credits now
 
 One file, standard library only, Python 3.9+: macOS's own /usr/bin/python3 runs
 it, and so does `uv run meterlex_collector.py …` on Windows.
@@ -39,7 +40,7 @@ from pathlib import Path
 from typing import Iterator, Optional
 from urllib.parse import urlparse
 
-VERSION = "0.7.0"
+VERSION = "0.8.0"
 BATCH = 1000               # turns per POST
 SPOOL_MAX = 500_000        # unsent turns kept on disk before the oldest are dropped
 HOME = Path.home()
@@ -1437,6 +1438,134 @@ def quota_flush(cfg: dict, state: dict) -> tuple[int, Optional[str]]:
     return len(readings), None
 
 
+# ── metered credits ───────────────────────────────────────────────────────────
+# ElevenLabs meters its plans in credits (characters) a month and reports them
+# through its own API. With a key, ELEVENLABS_API_KEY or an env file holding it
+# (config.json "elevenlabs_env", set with `credits --elevenlabs-env FILE`), `run`
+# reads the month's count and the daily usage stats at most every
+# CREDITS_EVERY_S and sends them as `credits`. The key only goes to ElevenLabs.
+
+CREDITS_EVERY_S = 900
+CREDITS_DAYS = 40           # daily figures sent with each reading: the month and a little before it
+ELEVENLABS = "https://api.elevenlabs.io"
+
+
+def elevenlabs_key(cfg: dict) -> Optional[str]:
+    if os.environ.get("ELEVENLABS_API_KEY", "").strip():
+        return os.environ["ELEVENLABS_API_KEY"].strip()
+    env = cfg.get("elevenlabs_env")
+    if not env:
+        return None
+    try:
+        text = Path(os.path.expanduser(env)).read_text(encoding="utf-8")
+    except OSError:
+        return None
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith("export "):
+            line = line[len("export "):]
+        name, sep, value = line.partition("=")
+        if sep and name.strip() == "ELEVENLABS_API_KEY":
+            return value.strip().strip("\"'") or None
+    return None
+
+
+def _elevenlabs(key: str, path: str) -> dict:
+    req = urllib.request.Request(ELEVENLABS + path, headers={
+        "xi-api-key": key, "Accept": "application/json", "User-Agent": f"meterlex-collector/{VERSION}"})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return json.loads(r.read().decode("utf-8"))
+
+
+def credit_reading(sub: dict, stats: dict, now: float) -> Optional[dict]:
+    """The subscription's count and the daily stats, as one reading."""
+    try:
+        used, limit = int(sub["character_count"]), int(sub["character_limit"])
+        resets = int(sub["next_character_count_reset_unix"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    days = []
+    usage = stats.get("usage") if isinstance(stats.get("usage"), dict) else {}
+    for i, ms in enumerate(stats.get("time") or []):
+        try:
+            day = datetime.fromtimestamp(float(ms) / 1000, tz=timezone.utc).date().isoformat()
+            n = sum(int(float(v[i])) for v in usage.values() if isinstance(v, list) and i < len(v))
+        except (TypeError, ValueError, OverflowError, OSError):
+            continue
+        days.append({"day": day, "used": n})
+    reading = {"provider": "elevenlabs", "used": used, "limit": limit, "resets_at": resets,
+               "ts": datetime.fromtimestamp(now, tz=timezone.utc).isoformat(), "days": days}
+    if sub.get("tier"):
+        reading["plan"] = str(sub["tier"])
+    return reading
+
+
+def read_credits(cfg: dict, now: float) -> tuple[Optional[dict], Optional[str]]:
+    """(reading, error); (None, None) when no key is set."""
+    key = elevenlabs_key(cfg)
+    if not key:
+        return None, None
+    end = int(now * 1000)
+    start = end - CREDITS_DAYS * 86_400_000
+    try:
+        sub = _elevenlabs(key, "/v1/user/subscription")
+        stats = _elevenlabs(key, f"/v1/usage/character-stats?start_unix={start}&end_unix={end}"
+                                 "&aggregation_interval=day")
+    except urllib.error.HTTPError as exc:
+        return None, f"ElevenLabs answered {exc.code}"
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        return None, f"ElevenLabs unreachable ({exc.__class__.__name__})"
+    reading = credit_reading(sub, stats, now)
+    return (reading, None) if reading else (None, "ElevenLabs sent no character count")
+
+
+def credits_flush(cfg: dict, state: dict, now: float) -> tuple[int, Optional[str]]:
+    """Read and send the credits when due. (sent, hub error); an ElevenLabs
+    error is kept in state['credits_error'] and tried again next run."""
+    if not elevenlabs_key(cfg) or now - state.get("credits_at", 0) < CREDITS_EVERY_S:
+        return 0, None
+    reading, state["credits_error"] = read_credits(cfg, now)
+    if state["credits_error"]:
+        print(f"credits: {state['credits_error']}", file=sys.stderr)
+        return 0, None
+    body = {"collector": VERSION, "machine": cfg["machine"], "turns": [], "credits": [reading]}
+    try:
+        _hub(cfg, "/api/ingest", body)
+    except urllib.error.HTTPError as exc:
+        return 0, f"hub answered {exc.code} to the credits"
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        return 0, f"hub unreachable for the credits: {exc}"
+    state["credits_at"] = int(now)
+    state["credits_last"] = {k: reading[k] for k in ("provider", "used", "limit", "resets_at", "ts")}
+    return 1, None
+
+
+def _credits_text(r: dict) -> str:
+    reset = datetime.fromtimestamp(r["resets_at"], tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    share = f" ({100 * r['used'] / r['limit']:.0f}%)" if r.get("limit") else ""
+    return f"{r['provider']} {r['used']:,} of {r['limit']:,} credits{share}, resets {reset}"
+
+
+def cmd_credits(args) -> int:
+    cfg = load_config()
+    if args.elevenlabs_env is not None:
+        if args.elevenlabs_env:
+            cfg["elevenlabs_env"] = args.elevenlabs_env
+        else:
+            cfg.pop("elevenlabs_env", None)
+        _write_json(config_dir() / "config.json", cfg)
+    reading, error = read_credits(cfg, time.time())
+    if error:
+        print(f"credits: {error}", file=sys.stderr)
+        return 1
+    if reading is None:
+        print("no ElevenLabs key: `credits --elevenlabs-env FILE` (a file holding ELEVENLABS_API_KEY=…), "
+              "or set ELEVENLABS_API_KEY", file=sys.stderr)
+        return 2
+    print(_credits_text(reading) + f" · {len(reading['days'])} day(s) of stats; `run` sends it")
+    return 0
+
+
 # ── commands ──────────────────────────────────────────────────────────────────
 
 def collect(cfg: dict, state: dict, full: bool, reattribute: bool = False) -> tuple[list, dict]:
@@ -1487,10 +1616,12 @@ def cmd_run(cfg: dict, dry_run: bool = False, full: bool = False, reattribute: b
         if state["probe_error"]:
             print(f"quota probe: {state['probe_error']}", file=sys.stderr)
     quota_sent, quota_error = quota_flush(cfg, state)
-    error = error or quota_error
+    credits_sent, credits_error = credits_flush(cfg, state, now)
+    error = error or quota_error or credits_error
     state["last_sent"], state["last_error"] = sent, error
     _write_json(state_path, state)
     print(f"sent {sent}" + (f", {quota_sent} quota reading(s)" if quota_sent else "")
+          + (", the credits" if credits_sent else "")
           + (f"; kept the rest for the next run ({error})" if error else ""))
     return 1 if error else 0
 
@@ -1545,6 +1676,13 @@ def cmd_status(cfg: dict) -> int:
     print(f"  probe    " + ("off (config.json)" if cfg.get("probe") is False else
                             f"{claude_exe() or 'claude not found'}, last {state.get('probed_at', 'never')}"
                             + (f", error {state['probe_error']}" if state.get("probe_error") else "")))
+    source = ("ELEVENLABS_API_KEY" if os.environ.get("ELEVENLABS_API_KEY", "").strip()
+              else cfg.get("elevenlabs_env"))
+    last = state.get("credits_last")
+    print(f"  credits  " + (f"elevenlabs, key from {source}" + (", key not found" if not elevenlabs_key(cfg) else "")
+                            + (f", last {_credits_text(last)} read {last['ts']}" if last else ", not read yet")
+                            + (f", error {state['credits_error']}" if state.get("credits_error") else "")
+                            if source else "off (`credits --elevenlabs-env FILE`)"))
     print(f"  last run {state.get('last_run', 'never')}, sent {state.get('last_sent', 0)}, "
           f"error {state.get('last_error') or 'none'}")
     return 0
@@ -1653,12 +1791,17 @@ def main(argv=None) -> int:
     i.add_argument("--every", type=int, default=300)
     sub.add_parser("statusline", help="Claude Code's status line: record the Claude Max quota, print one line")
     sub.add_parser("probe", help="read the Claude Max quota now with one tiny headless Claude call; `run` sends it")
+    c = sub.add_parser("credits", help="read the ElevenLabs credits now; `run` sends them every 15 minutes")
+    c.add_argument("--elevenlabs-env", metavar="FILE",
+                   help="an env file holding ELEVENLABS_API_KEY=… (saved in config.json; an empty value clears it)")
     args = ap.parse_args(argv)
 
     if args.cmd == "statusline":
         return cmd_statusline()
     if args.cmd == "probe":
         return cmd_probe()
+    if args.cmd == "credits":
+        return cmd_credits(args)
 
     if args.cmd == "setup":
         return cmd_setup(args)

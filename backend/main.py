@@ -23,6 +23,7 @@ import pricing
 import ingest
 import machines
 import quota as quota_view
+import credits as credits_view
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s %(message)s")
 log = logging.getLogger("meterlex")
@@ -208,9 +209,16 @@ def api_ingest(payload: dict, authorization: Optional[str] = Header(None),
         raise HTTPException(413, f"at most {ingest.MAX_TURNS_PER_BATCH} turns per batch")
     if quota and len(quota) > ingest.MAX_QUOTA_PER_BATCH:
         raise HTTPException(413, f"at most {ingest.MAX_QUOTA_PER_BATCH} quota readings per batch")
+    credits = payload.get("credits")
+    if credits is not None and not isinstance(credits, list):
+        raise HTTPException(400, "credits must be a list")
+    if credits and len(credits) > ingest.MAX_CREDITS_PER_BATCH:
+        raise HTTPException(413, f"at most {ingest.MAX_CREDITS_PER_BATCH} credit readings per batch")
     result = ingest.ingest_turns(session, machine, turns, collector=payload.get("collector"))
     if quota:
         result["quota"] = ingest.ingest_quota(session, machine, quota)
+    if credits:
+        result["credits"] = ingest.ingest_credits(session, machine, credits)
     return {"machine": machine.name, **result}
 
 
@@ -820,6 +828,14 @@ def session_usage(
         "last_ts": rows[-1][3].isoformat() if rows else None,
         "active_seconds": int(active),
     }
+
+
+@app.get("/api/credits")
+def api_credits(provider: str = Query("elevenlabs"), session: Session = Depends(get_session)):
+    """A provider's monthly credits: the month, used of the limit, the pace and where it lands."""
+    if provider not in credits_view.PROVIDERS:
+        raise HTTPException(404, f"unknown provider {provider!r}")
+    return credits_view.view(session, datetime.utcnow(), LOCAL_TZ, provider)
 
 
 # ── prices ────────────────────────────────────────────────────────────────────
