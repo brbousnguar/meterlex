@@ -148,3 +148,20 @@ class CreditDay(SQLModel, table=True):
     day: str = Field(primary_key=True)  # YYYY-MM-DD, UTC
     used: int = 0
     updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class BalanceReading(SQLModel, table=True):
+    """A prepaid account as its own API reports it, in micro-dollars (OpenRouter:
+    credits bought and used, all time). OpenAI says neither, so its reading only
+    marks when the costs were read; its spend is in `credit_days`."""
+    __tablename__ = "balance_readings"
+    __table_args__ = (
+        UniqueConstraint("provider", "ts", "machine", name="uq_balance_reading"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    provider: str = Field(index=True)   # openrouter, openai
+    bought: Optional[int] = None        # micro-USD, all time
+    used: Optional[int] = None          # micro-USD, all time
+    ts: datetime = Field(index=True)    # when it was read, naive UTC
+    machine: str = Field(default=HUB_MACHINE)

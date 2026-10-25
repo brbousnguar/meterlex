@@ -706,3 +706,54 @@ def test_an_elevenlabs_error_is_kept_and_tried_on_the_next_run(tmp_path, monkeyp
     state = {}
     assert mc.credits_flush({"machine": "m"}, state, 2_000_000.0) == (0, None)
     assert state["credits_error"] == "ElevenLabs answered 401" and "credits_at" not in state
+
+
+OPENROUTER_CREDITS = {"data": {"total_credits": 90, "total_usage": 86.4321}}
+OPENAI_COSTS = {"object": "page", "has_more": False, "next_page": None, "data": [
+    {"start_time": 1761091200, "end_time": 1761177600, "results": [          # 2025-10-22
+        {"amount": {"value": 0.25, "currency": "usd"}, "line_item": "gpt-realtime, input"},
+        {"amount": {"value": 1.5, "currency": "usd"}, "line_item": "gpt-realtime, output"}]},
+    {"start_time": 1761177600, "end_time": 1761264000, "results": []},     # an empty day still counts
+]}
+
+
+def test_prepaid_balances_read_each_provider_with_its_own_key(tmp_path, monkeypatch):
+    for var in ("OPENROUTER_API_KEY", "OPENAI_ADMIN_KEY"):
+        monkeypatch.delenv(var, raising=False)
+    (tmp_path / "or.env").write_text("export OPENROUTER_API_KEY='sk-or-test'\n")
+    (tmp_path / "oa.env").write_text("OPENAI_ADMIN_KEY=sk-admin-test\n")
+    cfg = {"machine": "m", "hub": "http://hub", "key": "k",
+           "openrouter_env": str(tmp_path / "or.env"), "openai_env": str(tmp_path / "oa.env")}
+    asked, sent = [], []
+
+    def fake_get(url, key):
+        asked.append((url.split("?")[0], key))
+        return OPENROUTER_CREDITS if "openrouter" in url else OPENAI_COSTS
+
+    monkeypatch.setattr(mc, "_get_json", fake_get)
+    monkeypatch.setattr(mc, "_hub", lambda cfg, path, body=None: sent.append(body) or {})
+    state = {}
+    assert mc.balances_flush(cfg, state, 2_000_000_000.0) == (2, None)
+    assert ("https://openrouter.ai/api/v1/credits", "sk-or-test") in asked
+    assert ("https://api.openai.com/v1/organization/costs", "sk-admin-test") in asked
+    by = {r["provider"]: r for r in sent[0]["balances"]}
+    assert by["openrouter"]["bought"] == 90_000_000 and by["openrouter"]["used"] == 86_432_100
+    assert by["openai"]["days"] == [{"day": "2025-10-22", "spent": 1_750_000}, {"day": "2025-10-23", "spent": 0}]
+    assert "sk-or-test" not in json.dumps(sent) and "sk-admin-test" not in json.dumps(sent)
+    assert state["balances"]["openrouter"]["last"] == "openrouter $3.57 left of $90.00 bought"
+    assert mc.balances_flush(cfg, state, 2_000_000_000.0 + 600) == (0, None)           # not due yet
+    assert mc.balances_flush({"machine": "m"}, {}, 2_000_000_000.0) == (0, None)       # no key, nothing asked
+
+
+def test_a_project_key_on_the_costs_api_says_an_admin_key_is_needed(monkeypatch):
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_ADMIN_KEY", "sk-proj-test")
+
+    def refuse(url, key):
+        raise urllib.error.HTTPError(url, 403, "forbidden", {}, None)
+
+    monkeypatch.setattr(mc, "_get_json", refuse)
+    state = {}
+    assert mc.balances_flush({"machine": "m"}, state, 2_000_000_000.0) == (0, None)
+    assert state["balances"]["openai"]["error"] == "OpenAI answered 403 (the costs API needs an admin key)"
+    assert "at" not in state["balances"]["openai"]

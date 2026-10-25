@@ -36,6 +36,12 @@ export const fmtEur = (n: number) =>
 
 export const fmtInt = (n: number) => n.toLocaleString("fr-FR");
 
+/** Dollars, as OpenRouter and OpenAI bill them and show them on their own pages: "$3.57", "<$0.01". */
+export const fmtUsd = (n: number) =>
+  n > 0 && n < 0.005 ? "<$0.01" : `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+/** Dollars on an axis: cents only when a step has them ("$1.5", "$2"). */
+export const fmtUsdShort = (n: number) => `$${n.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
+
 /** Money on an axis or a tick: whole euros, because "€65,00" next to "€260"
  *  reads as noise. */
 export const fmtEurShort = (n: number) => `€${Math.round(n).toLocaleString("fr-FR")}`;

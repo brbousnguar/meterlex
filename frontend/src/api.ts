@@ -5,6 +5,16 @@ async function get<T>(path: string): Promise<T> {
   if (!r.ok) throw new Error(`${r.status} ${path}`);
   return r.json();
 }
+async function put<T>(path: string, body: unknown): Promise<T> {
+  const r = await fetch(`${BASE}${path}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) throw new Error(`${r.status} ${path}`);
+  return r.json();
+}
+
 async function patch<T>(path: string, body: unknown): Promise<T> {
   const r = await fetch(`${BASE}${path}`, {
     method: "PATCH",
@@ -328,7 +338,33 @@ export type Credits = {
   days?: { day: string; used: number; current: boolean; future: boolean }[];
 };
 
+/** A prepaid account (#77), in dollars. OpenRouter says what was bought and used; OpenAI says neither, so
+ *  `left` is the balance saved from its billing page (`balance_set`) less what its costs API shows spent since. */
+export type Prepaid = {
+  kind: "prepaid";
+  now: string;
+  tz: string;
+  provider: "openrouter" | "openai";
+  label: string;
+  reading: { at: string; machine: string; stale: boolean } | null;
+  balance_set?: { usd: number; at: string } | null;
+  bought?: number | null;
+  used?: number | null;
+  spent_since_balance?: number;
+  left?: number | null;
+  /** dollars a day over the last seven days */
+  per_day?: number | null;
+  lasts_days?: number | null;
+  runs_out_at?: string | null;
+  spent?: { today: number; week: number; month: number; since: string; week_complete: boolean; month_complete: boolean };
+  /** the last 30 UTC days; `known` is false before the record starts */
+  days?: { day: string; spent: number; current: boolean; known: boolean }[];
+};
+
 export const api = {
+  prepaid: (provider: Prepaid["provider"]) => get<Prepaid>(`/api/credits?provider=${provider}`),
+  /** the balance read on the OpenAI billing page now; null clears it */
+  setOpenAIBalance: (usd: number | null) => put<Prepaid>("/api/credits/openai/balance", { usd }),
   quota: (back = 0) => get<Quota>(`/api/quota${back ? `?back=${back}` : ""}`),
   credits: (provider = "elevenlabs") => get<Credits>(`/api/credits?provider=${encodeURIComponent(provider)}`),
   health: () => get<Health>("/api/health"),

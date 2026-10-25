@@ -24,6 +24,7 @@ import ingest
 import machines
 import quota as quota_view
 import credits as credits_view
+import prepaid
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s %(message)s")
 log = logging.getLogger("meterlex")
@@ -214,11 +215,18 @@ def api_ingest(payload: dict, authorization: Optional[str] = Header(None),
         raise HTTPException(400, "credits must be a list")
     if credits and len(credits) > ingest.MAX_CREDITS_PER_BATCH:
         raise HTTPException(413, f"at most {ingest.MAX_CREDITS_PER_BATCH} credit readings per batch")
+    balances = payload.get("balances")
+    if balances is not None and not isinstance(balances, list):
+        raise HTTPException(400, "balances must be a list")
+    if balances and len(balances) > ingest.MAX_BALANCES_PER_BATCH:
+        raise HTTPException(413, f"at most {ingest.MAX_BALANCES_PER_BATCH} balance readings per batch")
     result = ingest.ingest_turns(session, machine, turns, collector=payload.get("collector"))
     if quota:
         result["quota"] = ingest.ingest_quota(session, machine, quota)
     if credits:
         result["credits"] = ingest.ingest_credits(session, machine, credits)
+    if balances:
+        result["balances"] = ingest.ingest_balances(session, machine, balances)
     return {"machine": machine.name, **result}
 
 
@@ -832,10 +840,29 @@ def session_usage(
 
 @app.get("/api/credits")
 def api_credits(provider: str = Query("elevenlabs"), session: Session = Depends(get_session)):
-    """A provider's monthly credits: the month, used of the limit, the pace and where it lands."""
+    """A provider's credits. ElevenLabs: the month, used of the limit, the pace and where it lands.
+    OpenRouter and OpenAI (#77): the prepaid balance left, the spend by day and how long it lasts."""
+    if provider in prepaid.PROVIDERS:
+        return prepaid.view(session, datetime.utcnow(), LOCAL_TZ, provider)
     if provider not in credits_view.PROVIDERS:
         raise HTTPException(404, f"unknown provider {provider!r}")
     return credits_view.view(session, datetime.utcnow(), LOCAL_TZ, provider)
+
+
+@app.put("/api/credits/openai/balance")
+def put_openai_balance(payload: dict, session: Session = Depends(get_session)):
+    """The balance shown on the OpenAI billing page now, in dollars ({"usd": 12.34}); null clears it.
+    OpenAI has no API for it, so what was spent since comes off this figure."""
+    usd = payload.get("usd")
+    if usd is not None:
+        try:
+            usd = float(usd)
+        except (TypeError, ValueError):
+            raise HTTPException(400, "usd must be a number of dollars, or null")
+        if not 0 <= usd <= 1_000_000:
+            raise HTTPException(400, "usd must be between 0 and 1,000,000")
+    prepaid.save_anchor(session, usd, datetime.utcnow())
+    return prepaid.view(session, datetime.utcnow(), LOCAL_TZ, "openai")
 
 
 # ── prices ────────────────────────────────────────────────────────────────────

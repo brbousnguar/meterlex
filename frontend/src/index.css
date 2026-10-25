@@ -43,6 +43,10 @@
   /* ElevenLabs is no harness and never shares a chart with them: its own black, the one
      colour clear of all eight (≥ 28.8 under every vision tested), 18.8:1 on paper. */
   --h-elevenlabs:  #000000;
+  /* The prepaid accounts (#77), each alone on its own Credits view, never beside a harness:
+     OpenAI in Codex's navy (its own model maker), OpenRouter in its indigo (4.7:1 on paper). */
+  --h-openai:      #1f2a44;
+  --h-openrouter:  #5b5ee0;
 
   /* The same harnesses as type on paper or a card (all ≥ 4.58:1 on paper). */
   --h-claude-text:      #a4471f;

@@ -15,7 +15,7 @@ from typing import Optional
 from sqlmodel import Session, select
 
 from database import engine, create_db
-from models import CreditDay, CreditReading, Machine, QuotaReading, UsageTurn
+from models import BalanceReading, CreditDay, CreditReading, Machine, QuotaReading, UsageTurn
 import pricing
 
 log = logging.getLogger("meterlex.ingest")
@@ -443,3 +443,70 @@ def ingest_credits(session: Session, machine: Machine, readings: list) -> dict:
         counts["inserted"] += 1
     session.commit()
     return counts
+
+
+# Prepaid accounts (#77), in micro-dollars. OpenRouter reports what was bought
+# and used, all time: the rise in `used` since the reading before goes to the
+# reading's UTC day. OpenAI reports its costs by UTC day, which replace the
+# day's figure as ElevenLabs' do.
+BALANCE_PROVIDERS = {"openrouter", "openai"}
+MAX_BALANCES_PER_BATCH = 50
+
+
+def _micro(value) -> Optional[int]:
+    return None if value is None else _count(value)
+
+
+def ingest_balances(session: Session, machine: Machine, readings: list) -> dict:
+    counts = {"inserted": 0, "unchanged": 0, "rejected": 0, "days": 0}
+    now = datetime.utcnow()
+    for raw in readings:
+        try:
+            provider = str(raw["provider"])
+            if provider not in BALANCE_PROVIDERS:
+                raise ValueError(provider)
+            bought, used = _micro(raw.get("bought")), _micro(raw.get("used"))
+            ts = datetime.fromisoformat(str(raw["ts"]).replace("Z", "+00:00"))
+            ts = ts if ts.tzinfo is None else ts.astimezone(timezone.utc).replace(tzinfo=None)
+            days = raw.get("days") or []
+            if not isinstance(days, list) or len(days) > MAX_CREDIT_DAYS:
+                raise ValueError("days")
+            days = [(str(d["day"]), _count(d["spent"])) for d in days]
+            if any(not _DAY.match(day) for day, _ in days):
+                raise ValueError("day")
+        except (KeyError, TypeError, ValueError, OverflowError, OSError):
+            counts["rejected"] += 1
+            continue
+        seen = session.exec(select(BalanceReading).where(
+            BalanceReading.provider == provider, BalanceReading.ts == ts, BalanceReading.machine == machine.name,
+        )).first()
+        if seen is not None:
+            counts["unchanged"] += 1
+            continue
+        for day, n in days:
+            _set_day(session, provider, day, n, now)
+            counts["days"] += 1
+        if used is not None:
+            before = session.exec(select(BalanceReading).where(
+                BalanceReading.provider == provider, BalanceReading.used.is_not(None),
+            ).order_by(BalanceReading.ts.desc())).first()
+            # only a reading newer than the last one moves a day: a late one would count twice
+            if before is not None and before.ts < ts and used > before.used:
+                day = ts.date().isoformat()
+                row = session.get(CreditDay, (provider, day))
+                _set_day(session, provider, day, (row.used if row else 0) + used - before.used, now)
+        session.add(BalanceReading(provider=provider, bought=bought, used=used, ts=ts, machine=machine.name))
+        session.flush()
+        counts["inserted"] += 1
+    session.commit()
+    return counts
+
+
+def _set_day(session: Session, provider: str, day: str, n: int, now: datetime) -> None:
+    row = session.get(CreditDay, (provider, day))
+    if row is None:
+        session.add(CreditDay(provider=provider, day=day, used=n, updated_at=now))
+    elif row.used != n:
+        row.used, row.updated_at = n, now
+        session.add(row)
+    session.flush()

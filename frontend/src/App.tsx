@@ -8,7 +8,7 @@ import Harnesses from "./screens/Harnesses";
 import Models from "./screens/Models";
 import More from "./screens/More";
 import Quota, { type QuotaMode, type QuotaWeek } from "./screens/Quota";
-import Credits, { type CreditsMonth } from "./screens/Credits";
+import Credits, { type CreditsMonth, type CreditsProvider } from "./screens/Credits";
 
 export type Tab = "now" | "quota" | "credits" | "machines" | "harnesses" | "models" | "more";
 
@@ -16,12 +16,15 @@ export type Tab = "now" | "quota" | "credits" | "machines" | "harnesses" | "mode
 const TABS: { id: Tab; label: string; title: string; icon: JSX.Element }[] = [
   { id: "now",       label: "Now",      title: "The reading", icon: <Icon d="M3 17h4V8H3v9Zm7 0h4V4h-4v13Zm7 0h4v-6h-4v6Z" /> },
   { id: "quota",     label: "Quota",    title: "Claude Max quota", icon: <Icon d="M3 4h18v6H3V4Zm2 2v2h8V6H5Zm-2 8h18v6H3v-6Zm2 2v2h4v-2H5Z" /> },
-  { id: "credits",   label: "Credits",  title: "ElevenLabs credits", icon: <Icon d="M3 9h3v6H3V9Zm5-5h3v16H8V4Zm5 3h3v10h-3V7Zm5 4h3v2h-3v-2Z" /> },
+  { id: "credits",   label: "Credits",  title: "Credits", icon: <Icon d="M3 9h3v6H3V9Zm5-5h3v16H8V4Zm5 3h3v10h-3V7Zm5 4h3v2h-3v-2Z" /> },
   { id: "machines",  label: "Machines", title: "Machines",    icon: <Icon d="M4 4h16v10H4V4Zm2 2v6h12V6H6ZM8 18h8v2H8v-2Z" /> },
   { id: "harnesses", label: "Harness",  title: "Harnesses",   icon: <Icon d="M4 4h7v16H4V4Zm9 0h7v7h-7V4Zm0 9h7v7h-7v-7Z" /> },
   { id: "models",    label: "Models",   title: "Models",      icon: <Icon d="M12 2 3 7l9 5 9-5-9-5Zm0 20 9-5v-5l-9 5-9-5v5l9 5Z" /> },
   { id: "more",      label: "More",     title: "Rates and collectors", icon: <Icon d="M3 10h4v4H3v-4Zm7 0h4v4h-4v-4Zm7 0h4v4h-4v-4Z" /> },
 ];
+/** The Credits header's switch: one provider at a time. */
+const CREDIT_PROVIDERS: { id: CreditsProvider; short: string }[] = [
+  { id: "elevenlabs", short: "ElevenLabs" }, { id: "openrouter", short: "OpenRouter" }, { id: "openai", short: "OpenAI" }];
 /** The Quota header's switch: the week, or the 5-hour window. */
 const QUOTA_MODES: { id: QuotaMode; short: string }[] = [{ id: "week", short: "Week" }, { id: "five", short: "5 hours" }];
 
@@ -62,6 +65,9 @@ export default function App() {
   const [week, setWeek] = useState<QuotaWeek | null>(null); // the window the Quota screen last read
   const [mode, setMode] = useState<QuotaMode>(() => recall("mx.quota") === "five" ? "five" : "week");
   const [month, setMonth] = useState<CreditsMonth | null>(null); // the ElevenLabs month last read
+  const [provider, setProvider] = useState<CreditsProvider>(() =>
+    CREDIT_PROVIDERS.find((p) => p.id === recall("mx.credits"))?.id ?? "elevenlabs");
+  const pickProvider = (p: CreditsProvider) => { setProvider(p); remember("mx.credits", p); };
   const [data, setData] = useState<Overview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const tabs = useThumb<HTMLElement>(tab);
@@ -134,14 +140,15 @@ export default function App() {
 
         <div className="period" data-fixed={tab === "quota" || tab === "credits" ? "" : undefined}>
           <h1 className="page-title">{TABS.find((t) => t.id === tab)?.title}</h1>
-          {tab === "credits" && (
+          {tab === "credits" && <>
+          <Seg label="Credits of" value={provider} options={CREDIT_PROVIDERS} onPick={pickProvider} />
           <div className="period-end">
           <div className="period-label">
-            This month
-            <small>{month ? `${dayOf(month.start, month.tz)} → ${dayOf(month.reset, month.tz)}` : " "}</small>
+            {provider === "elevenlabs" ? "This month" : "Paid ahead"}
+            <small>{provider !== "elevenlabs" ? "the last 30 days" : month ? `${dayOf(month.start, month.tz)} → ${dayOf(month.reset, month.tz)}` : " "}</small>
           </div>
           </div>
-          )}
+          </>}
           {tab === "quota" && <>
           {/* The two windows Claude meters, one at a time. */}
           <Seg label="Quota window" value={mode} options={QUOTA_MODES} onPick={pickMode} />
@@ -185,7 +192,7 @@ export default function App() {
         {!data && !error && tab !== "quota" && tab !== "credits" && <p className="empty">Reading the meters…</p>}
         {data && tab === "now"       && <Now data={data} unit={unit} go={go} />}
         {tab === "quota"             && <Quota back={back} mode={mode} onBack={setBack} onWeek={setWeek} />}
-        {tab === "credits"           && <Credits onMonth={setMonth} />}
+        {tab === "credits"           && <Credits provider={provider} onMonth={setMonth} />}
         {data && tab === "machines"  && <Machines data={data} unit={unit} />}
         {data && tab === "harnesses" && <Harnesses data={data} unit={unit} />}
         {data && tab === "models"    && <Models data={data} unit={unit} />}
