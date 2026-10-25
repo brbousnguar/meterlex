@@ -140,10 +140,13 @@ def view(session: Session, now: datetime, tz: ZoneInfo, provider: str) -> dict:
             out["spent_since_balance"] = _usd(after + on_day)
             left = round(a["usd"] * MICRO) - after - on_day
             # what the account held after the top-up: what is left plus all spent from that day on. The
-            # top-up day counts whole, so a day that began on the old money reads a little high.
+            # top-up day counts whole, so a day that began on the old money reads a little high; on the
+            # day the balance was typed, as after a top-up today, only what was spent after it counts.
             t = a["topped_up"]
             if t is not None and start <= t <= today:
                 since = sum(n for d, n in days.items() if date.fromisoformat(d) >= t)
+                if t == at_day:
+                    since -= min(a["day_spent"], days.get(t.isoformat(), 0))
                 out["topped_up"] = {"day": t.isoformat(), "held": _usd(left + since), "spent": _usd(since)}
         full = [today - timedelta(days=i) for i in range(1, RATE_DAYS + 1)]
         if start <= full[-1]:
