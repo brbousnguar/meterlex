@@ -575,6 +575,8 @@ a.linkout::after { content: "↗"; margin-left: auto; color: var(--accent-ink); 
   .content { padding: 22px 16px 48px; }
   .section { margin-top: 22px; padding: 18px 22px 22px; }
 }
+/* Seven tabs on the smallest phones: the labels step down so Machines and Harness keep a gap. */
+@media (max-width: 359px) { .tab { font-size: .6rem; } }
 /* A narrow tablet has no room for the icons beside the brand, nor for the title. */
 @media (min-width: 720px) and (max-width: 819px) { .tab svg { display: none; } }
 @media (min-width: 720px) and (max-width: 899px) { .page-title { display: none; } }
@@ -679,15 +681,15 @@ a.linkout::after { content: "↗"; margin-left: auto; color: var(--accent-ink); 
 .ql-limit { stroke: var(--ink-3); stroke-width: 1; }
 .ql-tick { fill: var(--ink-2); font-family: var(--mono); font-size: 11px; }
 .ql-pace { stroke: var(--ink-3); stroke-width: 1.5; stroke-dasharray: 5 5; }
-.ql-proj { stroke: var(--h-claude); stroke-width: 1.5; stroke-dasharray: 2 4; }
-.ql-used { fill: none; stroke: var(--h-claude); stroke-width: 2.5; stroke-linejoin: round; }
+.ql-proj { stroke: var(--meter, var(--h-claude)); stroke-width: 1.5; stroke-dasharray: 2 4; }
+.ql-used { fill: none; stroke: var(--meter, var(--h-claude)); stroke-width: 2.5; stroke-linejoin: round; }
 .ql-now { stroke: var(--ink); stroke-width: 1; }
 /* A plan change: a dashed hairline where it happened, each plan named above the plot at the start of
    its stretch; a change booked for a later day is dotted. Nothing is shaded. */
 .ql-plan-cut { stroke: var(--ink-2); stroke-width: 1; stroke-dasharray: 3 3; }
 .ql-plan-next { stroke: var(--ink-3); stroke-width: 1; stroke-dasharray: 1 3; }
 .ql-plan-name { fill: var(--ink-2); font-family: var(--mono); font-size: 10.5px; font-weight: 600; letter-spacing: .08em; }
-.ql-dot { fill: var(--h-claude); stroke: var(--surface); stroke-width: 2; }
+.ql-dot { fill: var(--meter, var(--h-claude)); stroke: var(--surface); stroke-width: 2; }
 .heat { display: grid; grid-template-columns: 30px repeat(24, minmax(0, 1fr)); gap: 2px; align-items: center; }
 .heat-h, .heat-d { font-family: var(--mono); font-size: .62rem; color: var(--ink-2); }
 .heat-c { display: block; aspect-ratio: 1; min-height: 8px; }
@@ -713,16 +715,16 @@ a.linkout::after { content: "↗"; margin-left: auto; color: var(--accent-ink); 
 .ql-hour { fill: var(--surface-2); }
 .ql-pick line { stroke: var(--ink); stroke-width: 1; }
 .ql-pick-pace { fill: var(--surface); stroke: var(--ink-3); stroke-width: 1.5; }
-.ql-pick-used { fill: var(--h-claude); stroke: var(--ink); stroke-width: 1.5; }
+.ql-pick-used { fill: var(--meter, var(--h-claude)); stroke: var(--ink); stroke-width: 1.5; }
 .ro-pace { display: inline-block; margin-top: 6px; padding: 2px 7px; font-weight: 650; border: 1px solid var(--rule); }
 .ro-pace.over  { background: var(--over-soft);  border-color: transparent; color: var(--over-deep); }
 .ro-pace.under { background: var(--under-soft); border-color: transparent; color: var(--under-deep); }
 .weekline-key { list-style: none; display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 10px; font-size: .78rem; color: var(--ink-2); }
 .weekline-key li { display: flex; align-items: center; gap: 7px; }
-.weekline-key i { display: block; width: 18px; height: 0; border-top: 2.5px solid var(--h-claude); }
+.weekline-key i { display: block; width: 18px; height: 0; border-top: 2.5px solid var(--meter, var(--h-claude)); }
 .weekline-key i.k-est  { border-top: 1.25px solid var(--ink-3); }
 .weekline-key i.k-pace { border-top: 1.5px dashed var(--ink-3); }
-.weekline-key i.k-proj { border-top: 1.5px dotted var(--h-claude); }
+.weekline-key i.k-proj { border-top: 1.5px dotted var(--meter, var(--h-claude)); }
 .weekline-key i.k-plan { width: 0; height: 12px; border-top: 0; border-left: 1px dashed var(--ink-2); }
 .weekline-key i.k-next { width: 0; height: 12px; border-top: 0; border-left: 1px dotted var(--ink-3); }
 /* On a phone the readout is a panel above the plot: one height for every hour, so the plot never moves under a finger. */
