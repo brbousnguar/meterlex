@@ -64,8 +64,9 @@ this month or this year** — periods counted in your own time zone, never UTC:
   from tokens), the week's budget in tokens, what is left per day to land at 100%,
   tokens per day of the window, a weekday × hour map of when you use it, past
   weeks, and the week's models, folders and machines. See [The Claude Max quota](#the-claude-max-quota).
-- **Credits** — the same for ElevenLabs credits a month, on a tab of its own.
-  See [ElevenLabs credits](#elevenlabs-credits).
+- **Credits** — the same for ElevenLabs credits a month, on a tab of its own,
+  and the OpenRouter and OpenAI balances paid ahead, one provider at a time.
+  See [ElevenLabs credits](#elevenlabs-credits) and [OpenRouter and OpenAI balances](#openrouter-and-openai-balances).
 - **Machines** — one meter per machine: its reading, its share, the shape of its
   period, when its collector last reported, and which machines went silent.
 - **Harnesses** — per tool: tokens, replies, models, list price against its fee,
@@ -310,6 +311,35 @@ and time a calendar month apart). It keeps clear of the Claude quota:
 A reading over an hour old is marked stale. Once the reset has passed, the page
 shows the new month empty until the next reading.
 
+### OpenRouter and OpenAI balances
+
+OpenRouter and the OpenAI platform are paid ahead: money goes in, calls take it
+out, and nothing resets. The Credits tab's switch (ElevenLabs · OpenRouter ·
+OpenAI) shows one at a time.
+
+- **OpenRouter** reports what the account bought and used, all time, to any of
+  its API keys (`GET /api/v1/credits`), so the balance is its own figure. What
+  was used since the reading before goes to that reading's UTC day: the days
+  start with the first reading.
+- **OpenAI** has no API for the balance. Its costs API (`/v1/organization/costs`)
+  gives the spend by UTC day, and only to an **admin key** (platform.openai.com →
+  Settings → Organization → Admin keys; a project key answers 403). Type the
+  balance from the billing page on the OpenAI view: what was spent from then on
+  comes off it. Type it again after a top-up. The costs can lag a few hours.
+
+```bash
+python3 collector/meterlex_collector.py credits --openrouter-env ~/.brb-git/.env --openai-env ~/.config/openai-admin.env
+```
+
+The files hold `OPENROUTER_API_KEY=…` and `OPENAI_ADMIN_KEY=…`; the variables
+in the collector's environment win. As for ElevenLabs, only the paths go in
+`config.json`, `run` reads both every 15 minutes, each key goes only to its own
+provider, and the hub gets the dollar figures (in micro-dollars). The view
+shows the balance left (and the share of what was bought, or of the balance
+typed, already spent), how long it lasts at the last seven days' rate, what
+went today, in the last 7 days and this month, and the spend by day over the
+last 30 UTC days.
+
 ## How it is put together
 
 ```text
@@ -320,9 +350,10 @@ backend/
   ingest.py         Stores collectors' batches: one row per reply, tool attribution, pricing
   machines.py       Machine keys (stored hashed)
   credits.py        ElevenLabs credits: the month, pace and projection from the collector's readings
+  prepaid.py        OpenRouter and OpenAI balances: what is left, the spend by day, how long it lasts
   manage.py         Admin commands: machine keys, legacy dedupe, quota plan
   pricing.py        Price resolution: mirrored rate card → Meterlex's fallbacks → free
-  models.py         SQLModel schema (UsageTurn, Machine, ModelPrice, Setting, ManualBill, CreditReading, CreditDay)
+  models.py         SQLModel schema (UsageTurn, Machine, ModelPrice, Setting, ManualBill, CreditReading, CreditDay, BalanceReading)
   database.py       Engine, session helpers, column migrations
 frontend/
   src/
@@ -406,12 +437,14 @@ paths.
 | Method | Route | Purpose |
 | --- | --- | --- |
 | `GET` | `/api/health` | Status, total turns, last ingest timestamp, turns per tool and per machine |
-| `POST` | `/api/ingest` | A collector's batch (`Authorization: Bearer <machine key>`); returns inserted / updated / folded / rejected. An optional `quota` list carries rate-limit readings, and `credits` (up to 50) metered-credit readings with their days |
+| `POST` | `/api/ingest` | A collector's batch (`Authorization: Bearer <machine key>`); returns inserted / updated / folded / rejected. An optional `quota` list carries rate-limit readings, `credits` (up to 50) metered-credit readings with their days, and `balances` (up to 50) prepaid-account readings in micro-dollars |
 | `GET` | `/api/machines` | Each machine: label policy, last report, collector version, turns and tokens |
 | `GET` | `/api/config` | What the UI needs about this deployment: the rate card's address and the period time zone |
 | `GET` | `/api/overview` | Everything one screen needs for a period (`?period=weekly\|monthly\|yearly`, `?ref=`, `?machine=`, `?source=`): totals with the token split, the same-length period before, by machine, harness, model, project (with its top branches) and origin, and a bucketed series with the empty buckets kept |
 | `GET` | `/api/quota` | The Claude Max week: window, used % against elapsed %, pace and projection, tokens, the estimated budget and what is left, per-day bars, tokens per hour of the window, past weeks, weekday × hour, top models, folders and machines, and `five_hour`: the open 5-hour window (used, elapsed, minutes left, pace and projection, when it was capped, its readings, tokens per ten minutes, tokens, budget and what is left) and the last six windows. `reading` carries `tokens_since` and `stale` (over 30 minutes old with Claude Code tokens after it). `?back=N` (0–8) reads the window N weeks earlier to its reset, without pace, projection, 5-hour window or booked plan |
-| `GET` | `/api/credits` | A metered service's month (`?provider=elevenlabs`, the only one): the latest reading and whether it is stale, the plan, the window from the reset before to the reset ahead, used / limit / left and %, pace and projection with the day the credits run out, what a day can spend to last to the reset, the last seven days' average, and credits per UTC day. `reading: null` before the first one |
+| `GET` | `/api/credits` | `?provider=elevenlabs`: the metered month: the latest reading and whether it is stale, the plan, the window from the reset before to the reset ahead, used / limit / left and %, pace and projection with the day the credits run out, what a day can spend to last to the reset, the last seven days' average, and credits per UTC day. `reading: null` before the first one |
+| `GET` | `/api/credits?provider=openrouter\|openai` | A prepaid account (`kind: "prepaid"`), in dollars: the latest reading and whether it is stale, bought / used (OpenRouter) or the balance typed and what was spent since (OpenAI), what is left, the rate a day over the last seven days, how many days it lasts and when it runs out, what went today / in 7 days / this month, and 30 UTC days of spend |
+| `PUT` | `/api/credits/openai/balance` | `{"usd": 12.34}`: the balance on the OpenAI billing page now (`null` clears it); returns the OpenAI view |
 | `GET` | `/api/sessions/{session_id}/usage` | One session's turns, tokens (input, output, cache), cost in EUR and USD, the same per model, first and last turn, and active seconds (gaps between turns, each capped at 5 minutes). `?from=` / `?to=` (ISO 8601, UTC without an offset) limit it to `[from, to)`. Subagent turns are stored under the parent session's id, so they are included. An unknown id answers `found: false` with zeros. Worklex uses it for the cost of each issue |
 | `GET` | `/api/summary` | Per-tool cost summary with subscription comparison (`?machine=` filters) |
 | `GET` | `/api/projects/mine` | The project labels stored for the calling machine (collector key) |

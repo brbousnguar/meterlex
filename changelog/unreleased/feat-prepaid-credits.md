@@ -1,0 +1,3 @@
+### Added
+- OpenRouter and OpenAI balances on the Credits tab, behind a switch ElevenLabs · OpenRouter · OpenAI (#77): what is left, how long it lasts at the last seven days' rate, what went today, in 7 days and this month, and 30 days of spend by day. OpenRouter's figures are its own (`/api/v1/credits`); OpenAI has no balance API, so its spend by day comes from the costs API with an admin key and the balance you type from the billing page
+- Collector 0.9.0: `credits --openrouter-env FILE --openai-env FILE`, read every 15 minutes by `run` and sent as `balances`; `GET /api/credits?provider=openrouter|openai`, `PUT /api/credits/openai/balance` (#77)

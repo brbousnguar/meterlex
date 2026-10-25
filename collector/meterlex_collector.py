@@ -14,7 +14,8 @@ into what is sent. `run --dry-run` prints exactly what would go.
     python meterlex_collector.py install      # launchd on macOS, a Scheduled Task on Windows, a systemd timer on Linux
     python meterlex_collector.py statusline   # Claude Code's status line: records the Claude Max quota
     python meterlex_collector.py probe        # read the Claude Max quota now, with one tiny headless call
-    python meterlex_collector.py credits [--elevenlabs-env FILE]   # read the ElevenLabs credits now
+    python meterlex_collector.py credits [--elevenlabs-env FILE] [--openrouter-env FILE] [--openai-env FILE]
+                                         # read the ElevenLabs credits and the prepaid balances now
 
 One file, standard library only, Python 3.9+: macOS's own /usr/bin/python3 runs
 it, and so does `uv run meterlex_collector.py …` on Windows.
@@ -40,7 +41,7 @@ from pathlib import Path
 from typing import Iterator, Optional
 from urllib.parse import urlparse
 
-VERSION = "0.8.0"
+VERSION = "0.9.0"
 BATCH = 1000               # turns per POST
 SPOOL_MAX = 500_000        # unsent turns kept on disk before the oldest are dropped
 HOME = Path.home()
@@ -1451,9 +1452,14 @@ ELEVENLABS = "https://api.elevenlabs.io"
 
 
 def elevenlabs_key(cfg: dict) -> Optional[str]:
-    if os.environ.get("ELEVENLABS_API_KEY", "").strip():
-        return os.environ["ELEVENLABS_API_KEY"].strip()
-    env = cfg.get("elevenlabs_env")
+    return env_key(cfg, "ELEVENLABS_API_KEY", "elevenlabs_env")
+
+
+def env_key(cfg: dict, var: str, cfg_key: str) -> Optional[str]:
+    """A key from the environment, or from the env file config.json names under cfg_key."""
+    if os.environ.get(var, "").strip():
+        return os.environ[var].strip()
+    env = cfg.get(cfg_key)
     if not env:
         return None
     try:
@@ -1465,7 +1471,7 @@ def elevenlabs_key(cfg: dict) -> Optional[str]:
         if line.startswith("export "):
             line = line[len("export "):]
         name, sep, value = line.partition("=")
-        if sep and name.strip() == "ELEVENLABS_API_KEY":
+        if sep and name.strip() == var:
             return value.strip().strip("\"'") or None
     return None
 
@@ -1548,22 +1554,163 @@ def _credits_text(r: dict) -> str:
 
 def cmd_credits(args) -> int:
     cfg = load_config()
-    if args.elevenlabs_env is not None:
-        if args.elevenlabs_env:
-            cfg["elevenlabs_env"] = args.elevenlabs_env
+    changed = False
+    for cfg_key in ("elevenlabs_env", "openrouter_env", "openai_env"):
+        value = getattr(args, cfg_key)
+        if value is None:
+            continue
+        if value:
+            cfg[cfg_key] = value
         else:
-            cfg.pop("elevenlabs_env", None)
+            cfg.pop(cfg_key, None)
+        changed = True
+    if changed:
         _write_json(config_dir() / "config.json", cfg)
-    reading, error = read_credits(cfg, time.time())
+    now, failed, read = time.time(), False, 0
+    reading, error = read_credits(cfg, now)
     if error:
         print(f"credits: {error}", file=sys.stderr)
-        return 1
-    if reading is None:
-        print("no ElevenLabs key: `credits --elevenlabs-env FILE` (a file holding ELEVENLABS_API_KEY=…), "
-              "or set ELEVENLABS_API_KEY", file=sys.stderr)
+        failed = True
+    elif reading is not None:
+        print(_credits_text(reading) + f" · {len(reading['days'])} day(s) of stats")
+        read += 1
+    for provider, key in balance_keys(cfg).items():
+        reading, error = read_balance(provider, key, now)
+        if error:
+            print(f"balances: {error}", file=sys.stderr)
+            failed = True
+        elif reading:
+            print(_balance_text(reading))
+            read += 1
+    if not read and not failed:
+        print("no key: `credits --elevenlabs-env FILE`, `--openrouter-env FILE` or `--openai-env FILE` "
+              "(env files holding ELEVENLABS_API_KEY=…, OPENROUTER_API_KEY=…, OPENAI_ADMIN_KEY=…)", file=sys.stderr)
         return 2
-    print(_credits_text(reading) + f" · {len(reading['days'])} day(s) of stats; `run` sends it")
-    return 0
+    if read:
+        print("`run` sends them every 15 minutes")
+    return 1 if failed else 0
+
+
+# ── prepaid balances ──────────────────────────────────────────────────────────
+# OpenRouter and the OpenAI platform are paid ahead (#77). OpenRouter's
+# /api/v1/credits gives what was bought and used, all time, with any of its API
+# keys (OPENROUTER_API_KEY, or an env file: config.json "openrouter_env"). OpenAI
+# has no balance API: its costs API gives the spend by UTC day, and only to an
+# admin key (OPENAI_ADMIN_KEY, or "openai_env"); the hub keeps the balance read
+# on the billing page. `run` reads both at most every CREDITS_EVERY_S and sends
+# them as `balances`, in micro-dollars. Each key only goes to its own provider.
+
+BALANCES = {   # provider: (variable, config.json key, name)
+    "openrouter": ("OPENROUTER_API_KEY", "openrouter_env", "OpenRouter"),
+    "openai": ("OPENAI_ADMIN_KEY", "openai_env", "OpenAI"),
+}
+OPENROUTER = "https://openrouter.ai"
+OPENAI = "https://api.openai.com"
+MICRO = 1_000_000
+
+
+def _get_json(url: str, key: str) -> dict:
+    req = urllib.request.Request(url, headers={
+        "Authorization": f"Bearer {key}", "Accept": "application/json",
+        "User-Agent": f"meterlex-collector/{VERSION}"})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return json.loads(r.read().decode("utf-8"))
+
+
+def openrouter_reading(body: dict, now: float) -> Optional[dict]:
+    data = body.get("data") if isinstance(body.get("data"), dict) else {}
+    try:
+        bought, used = float(data["total_credits"]), float(data["total_usage"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    return {"provider": "openrouter", "bought": round(bought * MICRO), "used": round(used * MICRO),
+            "ts": datetime.fromtimestamp(now, tz=timezone.utc).isoformat()}
+
+
+def openai_days(pages: list) -> list:
+    """The costs API's daily buckets as [{day, spent}], every day it returned, empty ones too."""
+    days = {}
+    for page in pages:
+        for bucket in page.get("data") or []:
+            try:
+                day = datetime.fromtimestamp(int(bucket["start_time"]), tz=timezone.utc).date().isoformat()
+                spent = sum(float(r["amount"]["value"]) for r in bucket.get("results") or []
+                            if str((r.get("amount") or {}).get("currency", "usd")).lower() == "usd")
+            except (KeyError, TypeError, ValueError, OverflowError, OSError):
+                continue
+            days[day] = days.get(day, 0) + round(spent * MICRO)
+    return [{"day": d, "spent": n} for d, n in sorted(days.items())]
+
+
+def read_balance(provider: str, key: str, now: float) -> tuple[Optional[dict], Optional[str]]:
+    name = BALANCES[provider][2]
+    try:
+        if provider == "openrouter":
+            reading = openrouter_reading(_get_json(OPENROUTER + "/api/v1/credits", key), now)
+            return (reading, None) if reading else (None, "OpenRouter sent no credits")
+        start = int(now // 86_400 - CREDITS_DAYS) * 86_400          # a UTC midnight, the days before this month
+        pages, page = [], None
+        for _ in range(5):
+            url = f"{OPENAI}/v1/organization/costs?start_time={start}&bucket_width=1d&limit={CREDITS_DAYS + 1}"
+            body = _get_json(url + (f"&page={page}" if page else ""), key)
+            pages.append(body)
+            page = body.get("next_page") if body.get("has_more") else None
+            if not page:
+                break
+        return ({"provider": "openai", "ts": datetime.fromtimestamp(now, tz=timezone.utc).isoformat(),
+                 "days": openai_days(pages)}, None)
+    except urllib.error.HTTPError as exc:
+        hint = " (the costs API needs an admin key)" if provider == "openai" and exc.code in (401, 403) else ""
+        return None, f"{name} answered {exc.code}{hint}"
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        return None, f"{name} unreachable ({exc.__class__.__name__})"
+
+
+def balance_keys(cfg: dict) -> dict:
+    """{provider: key} for the providers with a key on this machine."""
+    out = {}
+    for provider, (var, cfg_key, _) in BALANCES.items():
+        key = env_key(cfg, var, cfg_key)
+        if key:
+            out[provider] = key
+    return out
+
+
+def balances_flush(cfg: dict, state: dict, now: float) -> tuple[int, Optional[str]]:
+    """Read and send the balances that are due. (sent, hub error); a provider's
+    error is kept in state['balances'][provider]['error'] and tried again next run."""
+    mine = state.setdefault("balances", {})
+    readings = []
+    for provider, key in balance_keys(cfg).items():
+        st = mine.setdefault(provider, {})
+        if now - st.get("at", 0) < CREDITS_EVERY_S:
+            continue
+        reading, st["error"] = read_balance(provider, key, now)
+        if st["error"]:
+            print(f"balances: {st['error']}", file=sys.stderr)
+        elif reading:
+            readings.append(reading)
+    if not readings:
+        return 0, None
+    body = {"collector": VERSION, "machine": cfg["machine"], "turns": [], "balances": readings}
+    try:
+        _hub(cfg, "/api/ingest", body)
+    except urllib.error.HTTPError as exc:
+        return 0, f"hub answered {exc.code} to the balances"
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        return 0, f"hub unreachable for the balances: {exc}"
+    for r in readings:
+        mine[r["provider"]].update({"at": int(now), "last": _balance_text(r), "read": r["ts"]})
+    return len(readings), None
+
+
+def _balance_text(r: dict) -> str:
+    if r["provider"] == "openrouter":
+        return f"openrouter ${(r['bought'] - r['used']) / MICRO:,.2f} left of ${r['bought'] / MICRO:,.2f} bought"
+    days = r.get("days") or []
+    month = datetime.fromisoformat(r["ts"]).strftime("%Y-%m")
+    spent = sum(d["spent"] for d in days if d["day"].startswith(month)) / MICRO
+    return f"openai ${spent:,.2f} spent this month, {len(days)} day(s) of costs"
 
 
 # ── commands ──────────────────────────────────────────────────────────────────
@@ -1617,11 +1764,13 @@ def cmd_run(cfg: dict, dry_run: bool = False, full: bool = False, reattribute: b
             print(f"quota probe: {state['probe_error']}", file=sys.stderr)
     quota_sent, quota_error = quota_flush(cfg, state)
     credits_sent, credits_error = credits_flush(cfg, state, now)
-    error = error or quota_error or credits_error
+    balances_sent, balances_error = balances_flush(cfg, state, now)
+    error = error or quota_error or credits_error or balances_error
     state["last_sent"], state["last_error"] = sent, error
     _write_json(state_path, state)
     print(f"sent {sent}" + (f", {quota_sent} quota reading(s)" if quota_sent else "")
           + (", the credits" if credits_sent else "")
+          + (f", {balances_sent} balance(s)" if balances_sent else "")
           + (f"; kept the rest for the next run ({error})" if error else ""))
     return 1 if error else 0
 
@@ -1683,6 +1832,14 @@ def cmd_status(cfg: dict) -> int:
                             + (f", last {_credits_text(last)} read {last['ts']}" if last else ", not read yet")
                             + (f", error {state['credits_error']}" if state.get("credits_error") else "")
                             if source else "off (`credits --elevenlabs-env FILE`)"))
+    keys = balance_keys(cfg)
+    for provider, (var, cfg_key, _) in BALANCES.items():
+        st = (state.get("balances") or {}).get(provider, {})
+        where = var if os.environ.get(var, "").strip() else cfg.get(cfg_key)
+        print(f"  {provider:<9}" + (f"key from {where}" + ("" if provider in keys else ", key not found")
+                                    + (f", last {st['last']} read {st['read']}" if st.get("last") else ", not read yet")
+                                    + (f", error {st['error']}" if st.get("error") else "")
+                                    if where else f"off (`credits --{cfg_key.replace('_', '-')} FILE`)"))
     print(f"  last run {state.get('last_run', 'never')}, sent {state.get('last_sent', 0)}, "
           f"error {state.get('last_error') or 'none'}")
     return 0
@@ -1791,9 +1948,15 @@ def main(argv=None) -> int:
     i.add_argument("--every", type=int, default=300)
     sub.add_parser("statusline", help="Claude Code's status line: record the Claude Max quota, print one line")
     sub.add_parser("probe", help="read the Claude Max quota now with one tiny headless Claude call; `run` sends it")
-    c = sub.add_parser("credits", help="read the ElevenLabs credits now; `run` sends them every 15 minutes")
+    c = sub.add_parser("credits", help="read the ElevenLabs credits and the OpenRouter and OpenAI balances now; "
+                                       "`run` sends them every 15 minutes")
     c.add_argument("--elevenlabs-env", metavar="FILE",
                    help="an env file holding ELEVENLABS_API_KEY=… (saved in config.json; an empty value clears it)")
+    c.add_argument("--openrouter-env", metavar="FILE",
+                   help="an env file holding OPENROUTER_API_KEY=… (saved in config.json; an empty value clears it)")
+    c.add_argument("--openai-env", metavar="FILE",
+                   help="an env file holding OPENAI_ADMIN_KEY=…, an OpenAI admin key (saved in config.json; "
+                        "an empty value clears it)")
     args = ap.parse_args(argv)
 
     if args.cmd == "statusline":

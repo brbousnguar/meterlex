@@ -38,9 +38,11 @@ function niceMax(v: number) {
  * beside the selected column on a desktop, as a panel above the plot on a phone — never over the
  * bar it describes. ← → Home End move between buckets, ↑ ↓ between parts, Esc clears.
  */
-export default function Bars({ points, unit, height = 230, axis = true, compact = false, legend = true, what = "harnesses" }: {
+export default function Bars({ points, unit, height = 230, axis = true, compact = false, legend = true, what = "harnesses", format }: {
   points: BarPoint[];
   unit: Unit;
+  /** Figures in another measure than the units (the prepaid accounts' dollars): the readout's and the axis's. */
+  format?: { value: (v: number) => string; tick: (v: number) => string };
   height?: number;
   axis?: boolean;
   /** A small multiple: the readout sits above the plot instead of floating over 94px of bars. */
@@ -147,7 +149,7 @@ export default function Bars({ points, unit, height = 230, axis = true, compact 
   const ticks = [0, 1, 2, 3, 4].map((i) => (top / 4) * i);
   // One label per bar while they fit; every k-th when they do not.
   const every = Math.max(1, Math.ceil(points.length / Math.max(1, Math.floor((plotRef.current?.clientWidth ?? 600) / 56))));
-  const fmtV = (v: number) => (money ? fmtEur(v) : fmtTok(v));
+  const fmtV = (v: number) => (format ? format.value(v) : money ? fmtEur(v) : fmtTok(v));
   const focused = focus ? b?.parts?.find((p) => p.key === focus) : undefined;
   const pctOf = focused && b.value > 0 ? (focused.value / b.value) * 100 : null;
   const share = pctOf === null ? null : pctOf < 0.5 ? "<1%" : `${Math.round(pctOf)}%`;
@@ -210,7 +212,7 @@ export default function Bars({ points, unit, height = 230, axis = true, compact 
             <div className="bars-grid" aria-hidden="true">
               {ticks.map((v, i) => (
                 <div key={v} style={{ bottom: `${(i / 4) * 100}%` }} data-zero={i === 0 ? "" : undefined}>
-                  <span>{money ? fmtEurShort(v) : fmtTok(v)}</span>
+                  <span>{format ? format.tick(v) : money ? fmtEurShort(v) : fmtTok(v)}</span>
                 </div>
               ))}
             </div>
