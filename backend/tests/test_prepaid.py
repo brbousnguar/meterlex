@@ -1,5 +1,5 @@
 """Prepaid accounts: OpenRouter and OpenAI readings in, the balance, spend by day and how long it lasts out (#77)."""
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from sqlmodel import select
@@ -80,9 +80,18 @@ def test_openai_left_is_the_saved_balance_less_what_was_spent_since(session):
     days.update({"2026-10-20": 1.25, "2026-10-21": 2.0})
     ingest.ingest_balances(session, m, [_oa(T0 + timedelta(days=1), days)])
     v = prepaid.view(session, T0 + timedelta(days=1), PARIS, "openai")
-    assert v["balance_set"] == {"usd": 20.0, "at": "2026-10-20T09:00:00Z"}
+    assert v["balance_set"] == {"usd": 20.0, "at": "2026-10-20T09:00:00Z", "topped_up": None}
     assert v["spent_since_balance"] == 2.75 and v["left"] == 17.25
     assert session.get(CreditDay, ("openai", "2026-10-20")).used == 1_250_000      # a later read of a day wins
+
+    assert v["topped_up"] is None
+    prepaid.save_anchor(session, 20.0, T0, date(2026, 10, 15))   # again, now with the last top-up's day
+    v = prepaid.view(session, T0 + timedelta(days=1), PARIS, "openai")
+    assert v["balance_set"]["topped_up"] == "2026-10-15" and v["left"] == 18.0   # the 20th's $1.25 is out of it now
+    # 15th–19th at $0.50, the 20th's $1.25 and the 21st's $2: $5.75 spent since, so $23.75 held after it
+    assert v["topped_up"] == {"day": "2026-10-15", "held": 23.75, "spent": 5.75}
+    prepaid.save_anchor(session, 20.0, T0, date(2026, 9, 1))    # before the costs on record: no whole
+    assert prepaid.view(session, T0, PARIS, "openai")["topped_up"] is None
 
     prepaid.save_anchor(session, None, T0)
     assert prepaid.view(session, T0, PARIS, "openai")["balance_set"] is None
@@ -96,6 +105,10 @@ def test_the_api_takes_both_providers_and_the_openai_balance(client):
     assert r.status_code == 200 and r.json()["balance_set"]["usd"] == 12.5
     assert client.put("/api/credits/openai/balance", json={"usd": "lots"}).status_code == 400
     assert client.put("/api/credits/openai/balance", json={"usd": -1}).status_code == 400
+    r = client.put("/api/credits/openai/balance", json={"usd": 5, "topped_up": "2026-10-07"})
+    assert r.status_code == 200 and r.json()["balance_set"]["topped_up"] == "2026-10-07"
+    assert client.put("/api/credits/openai/balance", json={"usd": 5, "topped_up": "7 Oct"}).status_code == 400
+    assert client.put("/api/credits/openai/balance", json={"usd": 5, "topped_up": "2999-01-01"}).status_code == 400
     assert client.put("/api/credits/openai/balance", json={"usd": None}).json()["balance_set"] is None
     assert client.get("/api/settings").status_code == 200                  # the balance keys stay out of settings
 

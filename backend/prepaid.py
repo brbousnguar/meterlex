@@ -3,7 +3,9 @@
 OpenRouter says what was bought and used, all time, so the balance is theirs.
 OpenAI says neither: its costs API gives the spend by UTC day (with an admin
 key), and the balance is the one Brahim read on the billing page, saved here
-with the day's spend at that moment, less what was spent since.
+with the day's spend at that moment, less what was spent since. With the day
+of the last top-up beside it (#79), the meter measures what was spent since that
+top-up out of what the account held after it.
 
 Amounts are micro-dollars in the tables and dollars out. The rate is the last
 seven days: OpenRouter's from its own readings, OpenAI's from its full days.
@@ -23,9 +25,9 @@ RATE_DAYS = 7
 MIN_FOR_RATE = timedelta(hours=6)   # a rate from less than that is noise
 STALE_AFTER = timedelta(hours=1)    # the collector reads every 15 minutes
 MICRO = 1_000_000
-# the balance read on the OpenAI billing page, and the day's spend when it was saved
-OPENAI_BALANCE, OPENAI_BALANCE_AT, OPENAI_BALANCE_DAY_SPENT = (
-    "openai_balance_usd", "openai_balance_at", "openai_balance_day_spent")
+# the balance read on the OpenAI billing page, the day's spend when it was saved, and the last top-up's day
+OPENAI_BALANCE, OPENAI_BALANCE_AT, OPENAI_BALANCE_DAY_SPENT, OPENAI_TOPUP_DAY = (
+    "openai_balance_usd", "openai_balance_at", "openai_balance_day_spent", "openai_topup_day")
 
 
 def _iso(dt: Optional[datetime]) -> Optional[str]:
@@ -59,24 +61,28 @@ def _setting(session: Session, key: str) -> str:
 
 
 def anchor(session: Session) -> Optional[dict]:
-    """The OpenAI balance as last saved: {usd, at, day_spent} or None."""
+    """The OpenAI balance as last saved: {usd, at, day_spent, topped_up} or None."""
     usd, at = _setting(session, OPENAI_BALANCE), _setting(session, OPENAI_BALANCE_AT)
     if not usd or not at:
         return None
     try:
+        topup = _setting(session, OPENAI_TOPUP_DAY)
         return {"usd": float(usd), "at": datetime.fromisoformat(at),
-                "day_spent": int(_setting(session, OPENAI_BALANCE_DAY_SPENT) or 0)}
+                "day_spent": int(_setting(session, OPENAI_BALANCE_DAY_SPENT) or 0),
+                "topped_up": date.fromisoformat(topup) if topup else None}
     except ValueError:
         return None
 
 
-def save_anchor(session: Session, usd: Optional[float], now: datetime) -> None:
-    """Keep the balance read on the billing page now; None clears it. The day's
-    spend so far is already out of that balance, so it is kept to take off."""
+def save_anchor(session: Session, usd: Optional[float], now: datetime, topped_up: Optional[date] = None) -> None:
+    """Keep the balance read on the billing page now, and the day of the last
+    top-up if known; None clears both. The day's spend so far is already out of
+    that balance, so it is kept to take off."""
     spent = _days(session, "openai").get(now.date().isoformat(), 0)
-    values = ({OPENAI_BALANCE: "", OPENAI_BALANCE_AT: "", OPENAI_BALANCE_DAY_SPENT: ""} if usd is None else
+    values = ({OPENAI_BALANCE: "", OPENAI_BALANCE_AT: "", OPENAI_BALANCE_DAY_SPENT: "", OPENAI_TOPUP_DAY: ""}
+              if usd is None else
               {OPENAI_BALANCE: f"{usd:.2f}", OPENAI_BALANCE_AT: now.isoformat(timespec="seconds"),
-               OPENAI_BALANCE_DAY_SPENT: str(spent)})
+               OPENAI_BALANCE_DAY_SPENT: str(spent), OPENAI_TOPUP_DAY: topped_up.isoformat() if topped_up else ""})
     for key, value in values.items():
         row = session.get(Setting, key) or Setting(key=key)
         row.value = value
@@ -102,7 +108,9 @@ def view(session: Session, now: datetime, tz: ZoneInfo, provider: str) -> dict:
     days = _days(session, provider)
     if provider == "openai":
         a = anchor(session)
-        out["balance_set"] = None if a is None else {"usd": a["usd"], "at": _iso(a["at"])}
+        out["balance_set"] = None if a is None else {"usd": a["usd"], "at": _iso(a["at"]),
+                                                     "topped_up": a["topped_up"] and a["topped_up"].isoformat()}
+        out["topped_up"] = None
     if latest is None:
         return out
     out["reading"] = {"at": _iso(latest.ts), "machine": latest.machine, "stale": now - latest.ts > STALE_AFTER}
@@ -131,6 +139,12 @@ def view(session: Session, now: datetime, tz: ZoneInfo, provider: str) -> dict:
             on_day = max(0, days.get(at_day.isoformat(), 0) - a["day_spent"])
             out["spent_since_balance"] = _usd(after + on_day)
             left = round(a["usd"] * MICRO) - after - on_day
+            # what the account held after the top-up: what is left plus all spent from that day on. The
+            # top-up day counts whole, so a day that began on the old money reads a little high.
+            t = a["topped_up"]
+            if t is not None and start <= t <= today:
+                since = sum(n for d, n in days.items() if date.fromisoformat(d) >= t)
+                out["topped_up"] = {"day": t.isoformat(), "held": _usd(left + since), "spent": _usd(since)}
         full = [today - timedelta(days=i) for i in range(1, RATE_DAYS + 1)]
         if start <= full[-1]:
             rate = round(sum(days.get(d.isoformat(), 0) for d in full) / RATE_DAYS)

@@ -17,6 +17,8 @@ import { Meter } from "./Quota";
 export type CreditsMonth = { start: string; reset: string; tz: string };
 
 const FILL = "var(--h-elevenlabs)";
+/** a meter this full turns red (#79) */
+const ALARM_PCT = 90;
 
 const left = (days: number) => {
   const h = Math.max(0, Math.round(days * 24));
@@ -96,7 +98,7 @@ function Month({ c }: { c: CreditsData }) {
           </span>
         </div>
         <Meter used={c.used_pct ?? null} elapsed={w.elapsed_pct} projected={p?.projected_pct ?? null}
-               anchored={used !== null} live span="month" />
+               anchored={used !== null} live span="month" alarm={(c.used_pct ?? 0) >= ALARM_PCT} />
         <div className="reading-meta">
           {r.stale && <span className="pace-chip over">stale · read {when(r.at)}</span>}
           {p && (
@@ -234,8 +236,9 @@ function Balance({ c, onSaved }: { c: PrepaidData; onSaved: (c: PrepaidData) => 
   const s = c.spent;
   const left = c.left ?? null;
   const fill = PREPAID_FILL[c.provider];
-  // the share gone, of what was bought (OpenRouter) or of the balance saved from the billing page (OpenAI)
-  const whole = c.provider === "openrouter" ? c.bought ?? null : c.balance_set?.usd ?? null;
+  // the share gone, of what was bought (OpenRouter), or of what the account held after the last top-up, else of
+  // the balance saved from the billing page (OpenAI)
+  const whole = c.provider === "openrouter" ? c.bought ?? null : c.topped_up?.held ?? c.balance_set?.usd ?? null;
   const gone = whole && left !== null ? Math.max(0, Math.min(100, 100 * (1 - left / whole))) : null;
   const short = c.lasts_days != null && c.lasts_days < 7;
   const monthSpent = (c.days ?? []).reduce((a, d) => a + d.spent, 0);
@@ -259,6 +262,8 @@ function Balance({ c, onSaved }: { c: PrepaidData; onSaved: (c: PrepaidData) => 
             {c.provider === "openrouter"
               ? (left === null ? <>OpenRouter sent no balance</>
                 : <>left of {fmtUsd(c.bought ?? 0)} bought · {fmtUsd(c.used ?? 0)} spent in all</>)
+              : c.balance_set && c.topped_up
+                ? <>left of the {fmtUsd(c.topped_up.held)} held after the top-up {dayDate(`${c.topped_up.day}T12:00:00Z`)} · {fmtUsd(c.topped_up.spent)} spent since</>
               : c.balance_set
                 ? <>left of the {fmtUsd(c.balance_set.usd)} on the billing page {dayDate(c.balance_set.at)} · {fmtUsd(c.spent_since_balance ?? 0)} spent since</>
                 : <>no balance yet: type the one on the billing page below, and what OpenAI shows spent from then on comes off it</>}
@@ -266,7 +271,7 @@ function Balance({ c, onSaved }: { c: PrepaidData; onSaved: (c: PrepaidData) => 
         </div>
         {gone !== null && (
           <div className="quota-meter" role="img" aria-label={`${gone.toFixed(0)}% spent`}>
-            <i className="quota-fill" style={{ width: `${gone}%` }} />
+            <i className={`quota-fill${gone >= ALARM_PCT ? " alarm" : ""}`} style={{ width: `${gone}%` }} />
           </div>
         )}
         <div className="reading-meta">
@@ -337,12 +342,18 @@ function Balance({ c, onSaved }: { c: PrepaidData; onSaved: (c: PrepaidData) => 
 /** OpenAI's balance, typed from its billing page: there is no API for it. */
 function BalanceForm({ c, onSaved }: { c: PrepaidData; onSaved: (c: PrepaidData) => void }) {
   const [value, setValue] = useState(c.balance_set ? c.balance_set.usd.toFixed(2) : "");
+  const [topup, setTopup] = useState(c.balance_set?.topped_up ?? "");
+  const today = new Date().toISOString().slice(0, 10);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const save = (usd: number | null) => {
     setBusy(true);
-    api.setOpenAIBalance(usd)
-      .then((d) => { onSaved(d); setNote(usd === null ? "Cleared." : "Saved. What was spent from now on comes off it."); if (usd === null) setValue(""); })
+    api.setOpenAIBalance(usd, usd === null ? null : topup || null)
+      .then((d) => {
+        onSaved(d);
+        setNote(usd === null ? "Cleared." : "Saved. What was spent from now on comes off it.");
+        if (usd === null) { setValue(""); setTopup(""); }
+      })
       .catch((e) => setNote(`Not saved (${String(e.message ?? e)}).`))
       .finally(() => setBusy(false));
   };
@@ -359,6 +370,12 @@ function BalanceForm({ c, onSaved }: { c: PrepaidData; onSaved: (c: PrepaidData)
         </label>
         <input id="openai-balance" type="number" inputMode="decimal" step="0.01" min="0" value={value}
                onChange={(e) => setValue(e.target.value)} />
+      </div>
+      <div className="field">
+        <label htmlFor="openai-topup">
+          Day of the last top-up <span className="hint">· Billing history; the bar measures from it</span>
+        </label>
+        <input id="openai-topup" type="date" max={today} value={topup} onChange={(e) => setTopup(e.target.value)} />
       </div>
       <div className="actions">
         <button className="linkout" disabled={busy || !(usd >= 0)} onClick={() => save(usd)}><b>Save</b></button>

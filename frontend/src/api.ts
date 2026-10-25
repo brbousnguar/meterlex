@@ -347,7 +347,10 @@ export type Prepaid = {
   provider: "openrouter" | "openai";
   label: string;
   reading: { at: string; machine: string; stale: boolean } | null;
-  balance_set?: { usd: number; at: string } | null;
+  /** `topped_up` is the day of the last top-up, typed with the balance (#79) */
+  balance_set?: { usd: number; at: string; topped_up: string | null } | null;
+  /** OpenAI: what the account held after the last top-up (what is left plus all spent since), the meter's whole */
+  topped_up?: { day: string; held: number; spent: number } | null;
   bought?: number | null;
   used?: number | null;
   spent_since_balance?: number;
@@ -364,7 +367,8 @@ export type Prepaid = {
 export const api = {
   prepaid: (provider: Prepaid["provider"]) => get<Prepaid>(`/api/credits?provider=${provider}`),
   /** the balance read on the OpenAI billing page now; null clears it */
-  setOpenAIBalance: (usd: number | null) => put<Prepaid>("/api/credits/openai/balance", { usd }),
+  setOpenAIBalance: (usd: number | null, toppedUp: string | null = null) =>
+    put<Prepaid>("/api/credits/openai/balance", { usd, topped_up: toppedUp }),
   quota: (back = 0) => get<Quota>(`/api/quota${back ? `?back=${back}` : ""}`),
   credits: (provider = "elevenlabs") => get<Credits>(`/api/credits?provider=${encodeURIComponent(provider)}`),
   health: () => get<Health>("/api/health"),
