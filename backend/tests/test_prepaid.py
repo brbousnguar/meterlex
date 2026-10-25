@@ -90,6 +90,9 @@ def test_openai_left_is_the_saved_balance_less_what_was_spent_since(session):
     assert v["balance_set"]["topped_up"] == "2026-10-15" and v["left"] == 18.0   # the 20th's $1.25 is out of it now
     # 15th–19th at $0.50, the 20th's $1.25 and the 21st's $2: $5.75 spent since, so $23.75 held after it
     assert v["topped_up"] == {"day": "2026-10-15", "held": 23.75, "spent": 5.75}
+    prepaid.save_anchor(session, 20.0, T0, date(2026, 10, 20))  # topped up today: the 20th's $1.25 was the old money
+    v = prepaid.view(session, T0 + timedelta(days=1), PARIS, "openai")
+    assert v["topped_up"] == {"day": "2026-10-20", "held": 20.0, "spent": 2.0}
     prepaid.save_anchor(session, 20.0, T0, date(2026, 9, 1))    # before the costs on record: no whole
     assert prepaid.view(session, T0, PARIS, "openai")["topped_up"] is None
 
