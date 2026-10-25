@@ -64,8 +64,8 @@ this month or this year** — periods counted in your own time zone, never UTC:
   from tokens), the week's budget in tokens, what is left per day to land at 100%,
   tokens per day of the window, a weekday × hour map of when you use it, past
   weeks, and the week's models, folders and machines. See [The Claude Max quota](#the-claude-max-quota).
-  Its **ElevenLabs** view does the same for ElevenLabs credits a month. See
-  [ElevenLabs credits](#elevenlabs-credits).
+- **Credits** — the same for ElevenLabs credits a month, on a tab of its own.
+  See [ElevenLabs credits](#elevenlabs-credits).
 - **Machines** — one meter per machine: its reading, its share, the shape of its
   period, when its collector last reported, and which machines went silent.
 - **Harnesses** — per tool: tokens, replies, models, list price against its fee,
@@ -290,8 +290,8 @@ machine: the hub gets the counts. An ElevenLabs error (a revoked key, the API
 down) is shown by `status` and retried at the next run, and never holds up the
 turns.
 
-The Quota screen's **Week · 5 hours · ElevenLabs** switch opens the month, from
-one reset to the next (the same day and time a calendar month apart):
+The **Credits** tab shows the month, from one reset to the next (the same day
+and time a calendar month apart). It keeps clear of the Claude quota:
 
 - the share of the month's credits used against the share of the month gone,
   on the same meter as the Claude week, and the pace chip;
@@ -300,6 +300,11 @@ one reset to the next (the same day and time a calendar month apart):
   once the month is a day old;
 - what is used, what is left and how much a day lasts to the reset, the rate
   a day (the month's and the last seven days'), and the credits at the reset;
+- the month against its pace, the Claude week's line chart: the share used at
+  the end of each day (exact, from ElevenLabs' daily counts), an even month, and
+  at this rate to the reset or to where it hits 100%. Point at any day for its
+  figure, the credits that day and so far, and how far it ran ahead of pace;
+  `←` `→` move a day, Shift a week;
 - credits by day, UTC days as ElevenLabs counts them.
 
 A reading over an hour old is marked stale. Once the reset has passed, the page

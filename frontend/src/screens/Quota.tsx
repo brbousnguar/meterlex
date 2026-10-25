@@ -28,9 +28,8 @@ const left = (days: number) => {
   return h >= 24 ? `${Math.floor(h / 24)}d ${h % 24}h` : `${h}h`;
 };
 
-/** The two windows Claude meters, one at a time behind the header's switch, and the ElevenLabs
- *  month beside them (screens/Credits.tsx). */
-export type QuotaMode = "week" | "five" | "eleven";
+/** The two windows Claude meters, one at a time behind the header's switch. */
+export type QuotaMode = "week" | "five";
 /** The window read, for the header's label: the week, and the open 5-hour window if there is one. */
 export type QuotaWeek = { back: number; start: string; reset: string; tz: string; five: { start: string; reset: string } | null };
 

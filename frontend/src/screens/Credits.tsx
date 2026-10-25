@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, type Credits as CreditsData } from "../api";
 import Bars, { type BarPoint } from "../components/Bars";
+import MonthLine from "../components/MonthLine";
 import { fmtInt, pct } from "../lib";
 import { Meter } from "./Quota";
 
-/* The ElevenLabs month (#73). ElevenLabs meters its plans in credits a month and says so through
+/* The ElevenLabs month (#73), on its own tab (#75). ElevenLabs meters its plans in credits a month and says so through
    its own API: the collector reads the count and the daily stats, the hub lays them against the
    month. The Claude week's treatment: the figure, the meter against an even month, where the
    month's own rate lands by the reset, and the days the credits went. */
@@ -136,6 +137,14 @@ function Month({ c }: { c: CreditsData }) {
             </div>
           </div>
         </div>
+      </section>
+
+      <section className="section">
+        <div className="section-head">
+          <h2 className="section-title">The month against its pace</h2>
+          <div className="section-note">point at any day</div>
+        </div>
+        <MonthLine c={c} />
       </section>
 
       <section className="section">
