@@ -64,6 +64,8 @@ this month or this year** — periods counted in your own time zone, never UTC:
   from tokens), the week's budget in tokens, what is left per day to land at 100%,
   tokens per day of the window, a weekday × hour map of when you use it, past
   weeks, and the week's models, folders and machines. See [The Claude Max quota](#the-claude-max-quota).
+  Its **ElevenLabs** view does the same for ElevenLabs credits a month. See
+  [ElevenLabs credits](#elevenlabs-credits).
 - **Machines** — one meter per machine: its reading, its share, the shape of its
   period, when its collector last reported, and which machines went silent.
 - **Harnesses** — per tool: tokens, replies, models, list price against its fee,
@@ -268,6 +270,41 @@ them with the turns. One machine is enough: the quota belongs to the account.
   quota, cache reads count for little), and claude.ai or desktop use is in the
   percentage but not in the tokens. The percentage is the figure to trust.
 
+### ElevenLabs credits
+
+ElevenLabs bills text to speech in credits a month: a limit, a count, and the
+time the count resets. Its own API reports all three, plus the credits used each
+day, so the figure is exact and nothing is estimated. The collector on the
+machine that holds the API key reads them:
+
+```bash
+python3 collector/meterlex_collector.py credits --elevenlabs-env ~/.config/elevenlabs.env
+```
+
+The file holds `ELEVENLABS_API_KEY=…` (`export` and quotes are fine), or set
+`ELEVENLABS_API_KEY` in the collector's environment, which wins. `credits` saves
+the file's path in `config.json` (only the path, never the key) and prints one
+reading; `--elevenlabs-env ""` forgets it. From then on `run` asks ElevenLabs
+every 15 minutes and sends the reading with the turns. The key stays on that
+machine: the hub gets the counts. An ElevenLabs error (a revoked key, the API
+down) is shown by `status` and retried at the next run, and never holds up the
+turns.
+
+The Quota screen's **Week · 5 hours · ElevenLabs** switch opens the month, from
+one reset to the next (the same day and time a calendar month apart):
+
+- the share of the month's credits used against the share of the month gone,
+  on the same meter as the Claude week, and the pace chip;
+- "at this rate, used up <day>, N before the reset", or "N% by the reset",
+  from the month's own rate (credits from the reset to the last reading),
+  once the month is a day old;
+- what is used, what is left and how much a day lasts to the reset, the rate
+  a day (the month's and the last seven days'), and the credits at the reset;
+- credits by day, UTC days as ElevenLabs counts them.
+
+A reading over an hour old is marked stale. Once the reset has passed, the page
+shows the new month empty until the next reading.
+
 ## How it is put together
 
 ```text
@@ -277,9 +314,10 @@ backend/
   main.py           FastAPI application and REST API
   ingest.py         Stores collectors' batches: one row per reply, tool attribution, pricing
   machines.py       Machine keys (stored hashed)
+  credits.py        ElevenLabs credits: the month, pace and projection from the collector's readings
   manage.py         Admin commands: machine keys, legacy dedupe, quota plan
   pricing.py        Price resolution: mirrored rate card → Meterlex's fallbacks → free
-  models.py         SQLModel schema (UsageTurn, Machine, ModelPrice, Setting, ManualBill)
+  models.py         SQLModel schema (UsageTurn, Machine, ModelPrice, Setting, ManualBill, CreditReading, CreditDay)
   database.py       Engine, session helpers, column migrations
 frontend/
   src/
@@ -363,11 +401,12 @@ paths.
 | Method | Route | Purpose |
 | --- | --- | --- |
 | `GET` | `/api/health` | Status, total turns, last ingest timestamp, turns per tool and per machine |
-| `POST` | `/api/ingest` | A collector's batch (`Authorization: Bearer <machine key>`); returns inserted / updated / folded / rejected. An optional `quota` list carries rate-limit readings |
+| `POST` | `/api/ingest` | A collector's batch (`Authorization: Bearer <machine key>`); returns inserted / updated / folded / rejected. An optional `quota` list carries rate-limit readings, and `credits` (up to 50) metered-credit readings with their days |
 | `GET` | `/api/machines` | Each machine: label policy, last report, collector version, turns and tokens |
 | `GET` | `/api/config` | What the UI needs about this deployment: the rate card's address and the period time zone |
 | `GET` | `/api/overview` | Everything one screen needs for a period (`?period=weekly\|monthly\|yearly`, `?ref=`, `?machine=`, `?source=`): totals with the token split, the same-length period before, by machine, harness, model, project (with its top branches) and origin, and a bucketed series with the empty buckets kept |
 | `GET` | `/api/quota` | The Claude Max week: window, used % against elapsed %, pace and projection, tokens, the estimated budget and what is left, per-day bars, tokens per hour of the window, past weeks, weekday × hour, top models, folders and machines, and `five_hour`: the open 5-hour window (used, elapsed, minutes left, pace and projection, when it was capped, its readings, tokens per ten minutes, tokens, budget and what is left) and the last six windows. `reading` carries `tokens_since` and `stale` (over 30 minutes old with Claude Code tokens after it). `?back=N` (0–8) reads the window N weeks earlier to its reset, without pace, projection, 5-hour window or booked plan |
+| `GET` | `/api/credits` | A metered service's month (`?provider=elevenlabs`, the only one): the latest reading and whether it is stale, the plan, the window from the reset before to the reset ahead, used / limit / left and %, pace and projection with the day the credits run out, what a day can spend to last to the reset, the last seven days' average, and credits per UTC day. `reading: null` before the first one |
 | `GET` | `/api/sessions/{session_id}/usage` | One session's turns, tokens (input, output, cache), cost in EUR and USD, the same per model, first and last turn, and active seconds (gaps between turns, each capped at 5 minutes). `?from=` / `?to=` (ISO 8601, UTC without an offset) limit it to `[from, to)`. Subagent turns are stored under the parent session's id, so they are included. An unknown id answers `found: false` with zeros. Worklex uses it for the cost of each issue |
 | `GET` | `/api/summary` | Per-tool cost summary with subscription comparison (`?machine=` filters) |
 | `GET` | `/api/projects/mine` | The project labels stored for the calling machine (collector key) |

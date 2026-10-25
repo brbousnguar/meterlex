@@ -28,8 +28,9 @@ const left = (days: number) => {
   return h >= 24 ? `${Math.floor(h / 24)}d ${h % 24}h` : `${h}h`;
 };
 
-/** The two windows Claude meters, one at a time behind the header's switch. */
-export type QuotaMode = "week" | "five";
+/** The two windows Claude meters, one at a time behind the header's switch, and the ElevenLabs
+ *  month beside them (screens/Credits.tsx). */
+export type QuotaMode = "week" | "five" | "eleven";
 /** The window read, for the header's label: the week, and the open 5-hour window if there is one. */
 export type QuotaWeek = { back: number; start: string; reset: string; tz: string; five: { start: string; reset: string } | null };
 
@@ -354,12 +355,12 @@ function OpenWindow({ o, now, tz, hhmm }: { o: FiveHourOpen; now: string; tz: st
 }
 
 /** One track for the week: the fill is what is used, the tick is where the week is. */
-function Meter({ used, elapsed, projected, anchored, live }: { used: number | null; elapsed: number; projected: number | null; anchored: boolean; live: boolean }) {
+export function Meter({ used, elapsed, projected, anchored, live, span = "week" }: { used: number | null; elapsed: number; projected: number | null; anchored: boolean; live: boolean; span?: string }) {
   const u = Math.min(100, used ?? 0);
   const ahead = used !== null && used > elapsed;
   return (
     <div className="quota-meter" role="img"
-         aria-label={anchored ? `${(used ?? 0).toFixed(0)}% used, ${elapsed.toFixed(0)}% of the week gone` : "no reading yet"}>
+         aria-label={anchored ? `${(used ?? 0).toFixed(0)}% used, ${elapsed.toFixed(0)}% of the ${span} gone` : "no reading yet"}>
       <i className="quota-fill" style={{ width: `${u}%` }} />
       {ahead && <i className="quota-over" style={{ left: `${elapsed}%`, width: `${u - elapsed}%` }} />}
       {projected !== null && projected > u && (

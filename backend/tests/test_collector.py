@@ -648,3 +648,61 @@ def test_run_probes_and_sends_the_readings_in_the_same_pass(tmp_path, monkeypatc
     assert all(r["fresh"] for r in sent[0]["quota"])
     write_jsonl(Path(cfg["paths"]["claude_code"]) / "p" / "t.jsonl", [claude_line("u2", 1, msg_id="msg_2")])
     assert mc.cmd_run(cfg) == 0 and len(calls) == 1                           # read a moment ago: no second call
+
+
+SUBSCRIPTION = {"tier": "creator", "character_count": 121_886, "character_limit": 127_544,
+                "next_character_count_reset_unix": 1_794_132_400}
+STATS = {"time": [1_759_881_600_000, 1_759_968_000_000], "usage": {"All": [9122.0, 0.0]}}
+
+
+def test_the_elevenlabs_key_comes_from_the_environment_or_an_env_file(tmp_path, monkeypatch):
+    monkeypatch.delenv("ELEVENLABS_API_KEY", raising=False)
+    env = tmp_path / "eleven.env"
+    env.write_text('# ElevenLabs\nOTHER=x\nexport ELEVENLABS_API_KEY="sk_test"\n')
+    assert mc.elevenlabs_key({}) is None
+    assert mc.elevenlabs_key({"elevenlabs_env": str(env)}) == "sk_test"
+    assert mc.elevenlabs_key({"elevenlabs_env": str(tmp_path / "missing.env")}) is None
+    monkeypatch.setenv("ELEVENLABS_API_KEY", "sk_env")
+    assert mc.elevenlabs_key({"elevenlabs_env": str(env)}) == "sk_env"
+
+
+def test_a_credit_reading_carries_the_count_and_the_days():
+    r = mc.credit_reading(SUBSCRIPTION, STATS, 1_761_350_400.0)
+    assert (r["provider"], r["used"], r["limit"], r["resets_at"], r["plan"]) == \
+        ("elevenlabs", 121_886, 127_544, 1_794_132_400, "creator")
+    assert r["days"] == [{"day": "2025-10-08", "used": 9122}, {"day": "2025-10-09", "used": 0}]
+    assert mc.credit_reading({"tier": "free"}, STATS, 0) is None
+
+
+def test_run_sends_the_credits_every_fifteen_minutes(tmp_path, monkeypatch):
+    monkeypatch.delenv("ELEVENLABS_API_KEY", raising=False)
+    monkeypatch.setenv("METERLEX_HOME", str(tmp_path))
+    env = tmp_path / "eleven.env"
+    env.write_text("ELEVENLABS_API_KEY=sk_test\n")
+    cfg, state, sent, asked = {"machine": "m", "hub": "http://hub", "key": "k", "elevenlabs_env": str(env)}, {}, [], []
+
+    def fake_eleven(key, path):
+        asked.append((key, path.split("?")[0]))
+        return SUBSCRIPTION if path.startswith("/v1/user/") else STATS
+
+    monkeypatch.setattr(mc, "_elevenlabs", fake_eleven)
+    monkeypatch.setattr(mc, "_hub", lambda cfg, path, body=None: sent.append(body) or {})
+    assert mc.credits_flush(cfg, state, 2_000_000.0) == (1, None)
+    assert sent[0]["credits"][0]["used"] == 121_886 and sent[0]["turns"] == []
+    assert ("sk_test", "/v1/user/subscription") in asked
+    assert all("sk_test" not in json.dumps(b) for b in sent)                  # the key never reaches the hub
+    assert mc.credits_flush(cfg, state, 2_000_000.0 + 600) == (0, None)       # not due yet
+    assert mc.credits_flush(cfg, state, 2_000_000.0 + 900) == (1, None)
+    assert mc.credits_flush({"machine": "m"}, {}, 2_000_000.0) == (0, None)   # no key, nothing asked
+
+
+def test_an_elevenlabs_error_is_kept_and_tried_on_the_next_run(tmp_path, monkeypatch):
+    monkeypatch.setenv("ELEVENLABS_API_KEY", "sk_test")
+
+    def refuse(key, path):
+        raise urllib.error.HTTPError(path, 401, "unauthorized", {}, None)
+
+    monkeypatch.setattr(mc, "_elevenlabs", refuse)
+    state = {}
+    assert mc.credits_flush({"machine": "m"}, state, 2_000_000.0) == (0, None)
+    assert state["credits_error"] == "ElevenLabs answered 401" and "credits_at" not in state

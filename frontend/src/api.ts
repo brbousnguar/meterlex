@@ -298,8 +298,39 @@ export interface Quota {
   by_model: { key: string; tokens: number }[];
 }
 
+/** A provider's monthly credits, as its own API reports them (#73). `used` is null when the
+ *  count reset since the last reading. */
+export type Credits = {
+  now: string;
+  tz: string;
+  provider: string;
+  label: string;
+  reading: { at: string; machine: string; stale: boolean } | null;
+  plan?: string | null;
+  plan_label?: string | null;
+  window?: { start: string; reset: string; elapsed_pct: number; days_left: number; reset_passed: boolean };
+  used?: number | null;
+  limit?: number;
+  left?: number | null;
+  used_pct?: number | null;
+  /** an even month; the projection carries the month's own rate (credits a day) to the reset */
+  pace?: {
+    status: "ahead" | "on" | "behind";
+    delta_pts: number;
+    per_day: number | null;
+    projected_used: number | null;
+    projected_pct: number | null;
+    runs_out_at: string | null;
+  } | null;
+  per_day_to_reset?: number | null;
+  recent_per_day?: number;
+  /** credits by UTC day, from the reset's day to the reset ahead */
+  days?: { day: string; used: number; current: boolean; future: boolean }[];
+};
+
 export const api = {
   quota: (back = 0) => get<Quota>(`/api/quota${back ? `?back=${back}` : ""}`),
+  credits: (provider = "elevenlabs") => get<Credits>(`/api/credits?provider=${encodeURIComponent(provider)}`),
   health: () => get<Health>("/api/health"),
   overview: (period: Period, ref?: string | null, machine?: string | null) =>
     get<Overview>(`/api/overview?period=${period}${ref ? `&ref=${encodeURIComponent(ref)}` : ""}` +

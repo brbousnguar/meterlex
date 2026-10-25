@@ -40,6 +40,9 @@
   --h-copilot:     #d9a932;
   --h-openclaw:    #286f73;
   --h-hermes:      #64307c;
+  /* ElevenLabs is no harness and never shares a chart with them: its own black, the one
+     colour clear of all eight (≥ 28.8 under every vision tested), 18.8:1 on paper. */
+  --h-elevenlabs:  #000000;
 
   /* The same harnesses as type on paper or a card (all ≥ 4.58:1 on paper). */
   --h-claude-text:      #a4471f;
@@ -654,10 +657,10 @@ a.linkout::after { content: "↗"; margin-left: auto; color: var(--accent-ink); 
 /* The track is the week's quota; the fill what is used; the tick where the week is. */
 .quota-meter { position: relative; height: 22px; background: var(--surface-2); border: 1px solid var(--rule); margin: 0 0 26px; }
 .quota-meter i { position: absolute; top: 0; bottom: 0; display: block; }
-.quota-fill { left: 0; background: var(--h-claude); }
+.quota-fill { left: 0; background: var(--meter, var(--h-claude)); }
 .quota-over { background: var(--over); }
 .quota-proj {
-  background: repeating-linear-gradient(135deg, var(--h-claude) 0 2px, transparent 2px 7px);
+  background: repeating-linear-gradient(135deg, var(--meter, var(--h-claude)) 0 2px, transparent 2px 7px);
   opacity: .55;
 }
 .quota-now { width: 2px; margin-left: -1px; top: -5px !important; bottom: -5px !important; background: var(--ink); }
@@ -698,6 +701,8 @@ a.linkout::after { content: "↗"; margin-left: auto; color: var(--accent-ink); 
 }
 /* The page keeps the week it has while the next one loads, dimmed so it never reads as the new one. */
 .quota[data-stale] { opacity: .45; transition: opacity .15s; }
+/* The ElevenLabs month: the Claude week's treatment in ElevenLabs black. */
+.credits { --meter: var(--h-elevenlabs); }
 .quota-cols { display: grid; gap: 0 22px; }
 @media (min-width: 1000px) { .quota-cols { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; } }
 /* The week line reads like the bar charts: the whole plot is the hit target. */

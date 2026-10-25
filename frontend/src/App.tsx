@@ -8,6 +8,7 @@ import Harnesses from "./screens/Harnesses";
 import Models from "./screens/Models";
 import More from "./screens/More";
 import Quota, { type QuotaMode, type QuotaWeek } from "./screens/Quota";
+import Credits, { type CreditsMonth } from "./screens/Credits";
 
 export type Tab = "now" | "quota" | "machines" | "harnesses" | "models" | "more";
 
@@ -20,8 +21,10 @@ const TABS: { id: Tab; label: string; title: string; icon: JSX.Element }[] = [
   { id: "models",    label: "Models",   title: "Models",      icon: <Icon d="M12 2 3 7l9 5 9-5-9-5Zm0 20 9-5v-5l-9 5-9-5v5l9 5Z" /> },
   { id: "more",      label: "More",     title: "Rates and collectors", icon: <Icon d="M3 10h4v4H3v-4Zm7 0h4v4h-4v-4Zm7 0h4v4h-4v-4Z" /> },
 ];
-/** The Quota header's switch: the week, or the 5-hour window. */
-const QUOTA_MODES: { id: QuotaMode; short: string }[] = [{ id: "week", short: "Week" }, { id: "five", short: "5 hours" }];
+/** The Quota header's switch: the Claude week, the 5-hour window, or the ElevenLabs month. */
+const QUOTA_MODES: { id: QuotaMode; short: string }[] = [
+  { id: "week", short: "Week" }, { id: "five", short: "5 hours" }, { id: "eleven", short: "ElevenLabs" },
+];
 
 /* The header mark is the app icon (public/icon.svg), drawn from the theme tokens:
    the clay tile of the Atlas mark, a dial cut from paper in six facets, four of
@@ -59,6 +62,7 @@ export default function App() {
   const [back, setBack] = useState(0);                      // the Quota week in view, weeks before this one
   const [week, setWeek] = useState<QuotaWeek | null>(null); // the window the Quota screen last read
   const [mode, setMode] = useState<QuotaMode>(() => (recall("mx.quota") as QuotaMode) || "week");
+  const [month, setMonth] = useState<CreditsMonth | null>(null); // the ElevenLabs month last read
   const [data, setData] = useState<Overview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const tabs = useThumb<HTMLElement>(tab);
@@ -86,7 +90,7 @@ export default function App() {
 
   const stepWeek = (delta: number) => setBack((b) => Math.max(0, Math.min(QUOTA_WEEKS_BACK, b + delta)));
   // the 5-hour window is live only: picking it brings the week back to this one
-  const pickMode = (m: QuotaMode) => { setMode(m); remember("mx.quota", m); if (m === "five") setBack(0); };
+  const pickMode = (m: QuotaMode) => { setMode(m); remember("mx.quota", m); if (m !== "week") setBack(0); };
   // ← → step the Quota week when nothing else wants the keys (the week line takes them while focused)
   useEffect(() => {
     if (tab !== "quota" || mode !== "week") return;
@@ -130,9 +134,9 @@ export default function App() {
         </div>
 
         <div className="period" data-fixed={tab === "quota" ? "" : undefined}>
-          <h1 className="page-title">{TABS.find((t) => t.id === tab)?.title}</h1>
+          <h1 className="page-title">{tab === "quota" && mode === "eleven" ? "ElevenLabs credits" : TABS.find((t) => t.id === tab)?.title}</h1>
           {tab === "quota" && <>
-          {/* The two windows Claude meters, one at a time: the week, or the 5-hour window. */}
+          {/* The two windows Claude meters, one at a time, and the ElevenLabs month. */}
           <Seg label="Quota window" value={mode} options={QUOTA_MODES} onPick={pickMode} />
           {/* The steppers and the label keep to the right end, so the switch stays put when the steppers go. */}
           <div className="period-end">
@@ -146,7 +150,12 @@ export default function App() {
             {back === 0 ? "This week" : back === 1 ? "Last week" : `${back} weeks back`}
             <small>{week && week.back === back ? `${dayOf(week.start, week.tz)} → ${dayOf(week.reset, week.tz)}` : " "}</small>
           </div>
-          </> : (
+          </> : mode === "eleven" ? (
+          <div className="period-label">
+            This month
+            <small>{month ? `${dayOf(month.start, month.tz)} → ${dayOf(month.reset, month.tz)}` : " "}</small>
+          </div>
+          ) : (
           <div className="period-label">
             {!week ? "5-hour window" : week.five ? "This window" : "No window open"}
             <small>{!week ? " " : week.five ? `${hhmm(week.five.start, week.tz)} → ${hhmm(week.five.reset, week.tz)}` : "opens with the first message"}</small>
@@ -173,7 +182,8 @@ export default function App() {
         {error && tab !== "quota" && <p className="err">The hub did not answer ({error}). Retrying every minute.</p>}
         {!data && !error && tab !== "quota" && <p className="empty">Reading the meters…</p>}
         {data && tab === "now"       && <Now data={data} unit={unit} go={go} />}
-        {tab === "quota"             && <Quota back={back} mode={mode} onBack={setBack} onWeek={setWeek} />}
+        {tab === "quota" && mode === "eleven" && <Credits onMonth={setMonth} />}
+        {tab === "quota" && mode !== "eleven" && <Quota back={back} mode={mode} onBack={setBack} onWeek={setWeek} />}
         {data && tab === "machines"  && <Machines data={data} unit={unit} />}
         {data && tab === "harnesses" && <Harnesses data={data} unit={unit} />}
         {data && tab === "models"    && <Models data={data} unit={unit} />}

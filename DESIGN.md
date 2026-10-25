@@ -88,6 +88,13 @@ two harnesses can end up neighbours:
   its own nearest are teal at 10.8 (CVD) and ink / the lilac tile at 16.2 / 16.1
   (normal vision), and it sits 19.1 from `--over`.
 
+**ElevenLabs** (added 2026-10-25, #73) is not a harness: it is a metered service on
+the Quota screen's third view, and its meter and day bars never sit beside a harness.
+It takes `--h-elevenlabs: #000000`, black, its own brand colour. Run against the set
+anyway, in case the views ever meet: black is the one colour that clears all eight
+harness fills at 28.8 or more in every vision, a step past Codex's ink, and it reads
+18.8:1 on paper.
+
 Three more colours, and no others:
 
 | Token | Hex | Meaning |
