@@ -41,7 +41,7 @@ from pathlib import Path
 from typing import Iterator, Optional
 from urllib.parse import urlparse
 
-VERSION = "0.9.0"
+VERSION = "0.9.1"
 BATCH = 1000               # turns per POST
 SPOOL_MAX = 500_000        # unsent turns kept on disk before the oldest are dropped
 HOME = Path.home()
@@ -1301,9 +1301,9 @@ def cmd_statusline(stdin=None) -> int:
 # however much they spend, no reading arrives. A headless call reports the same
 # limits in its stream-json `rate_limit_event` (`unifiedWindows.<window>`,
 # utilization 0-1). `run` makes one, on Haiku with no tools, MCP servers,
-# settings or transcript (about 3.6k tokens), when it found Claude turns from
-# the last minutes and nothing was read for PROBE_EVERY_S. Only after real use,
-# so a probe never opens a 5-hour window by itself. `"probe": false` in
+# settings or transcript (about 3.6k tokens), when Claude turns from the last
+# minutes came after the last reading and nothing was read for PROBE_EVERY_S.
+# Only after real use, so a probe never opens a 5-hour window by itself. `"probe": false` in
 # config.json turns it off on a machine signed in to another account.
 
 PROBE_EVERY_S = 600
@@ -1382,10 +1382,14 @@ def probe_due(cfg: dict, state: dict, turns: list, now: float) -> bool:
         return False
     spent = [_epoch(t.get("ts")) for t in turns
              if t.get("source") == "claude-code" and str(t.get("model_id", "")).startswith("claude-")]
-    if not spent or now - max(spent) > PROBE_RECENT_S:
+    # the latest spend, kept across runs: a burst that ends within PROBE_EVERY_S
+    # of a probe brings its last turns in a run too early to probe, and the next
+    # run finds nothing new, so its tail would wait for the next session (#83)
+    state["spent_at"] = max([state.get("spent_at", 0), *spent])
+    if now - state["spent_at"] > PROBE_RECENT_S:
         return False
-    read_at = _read_json(config_dir() / "quota-last.json", {}).get("read_at", 0)
-    return now - max(read_at, state.get("probed_at", 0)) >= PROBE_EVERY_S
+    read_at = max(_read_json(config_dir() / "quota-last.json", {}).get("read_at", 0), state.get("probed_at", 0))
+    return state["spent_at"] > read_at and now - read_at >= PROBE_EVERY_S
 
 
 def cmd_probe() -> int:
