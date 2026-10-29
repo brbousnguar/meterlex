@@ -623,6 +623,16 @@ def test_a_probe_runs_only_after_claude_turns_and_not_twice_in_ten_minutes(tmp_p
     assert mc.probe_due(cfg, {"probed_at": now - 900}, [_turn()], now + 600)
 
 
+def test_a_probe_reads_the_tail_of_a_burst_the_last_probe_missed(tmp_path, monkeypatch):
+    monkeypatch.setenv("METERLEX_HOME", str(tmp_path))
+    now, cfg, state = 1_000_000.0, {"machine": "m"}, {"probed_at": 1_000_000.0 - 300}
+    assert not mc.probe_due(cfg, state, [_turn(ago=60)], now)     # the burst's last turns, 5 min after a probe
+    assert mc.probe_due(cfg, state, [], now + 360)                 # next run finds nothing new; they are unread
+    assert not mc.probe_due(cfg, dict(state), [], now + 900)      # 16 min idle: a probe could open a window
+    state["probed_at"] = now + 360
+    assert not mc.probe_due(cfg, state, [], now + 1200)            # read after the last spend: nothing to read
+
+
 def test_run_probes_and_sends_the_readings_in_the_same_pass(tmp_path, monkeypatch):
     home = tmp_path / "home"
     monkeypatch.setenv("METERLEX_HOME", str(home))
