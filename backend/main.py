@@ -902,11 +902,11 @@ def list_prices(session: Session = Depends(get_session)):
 
 @app.post("/api/prices/mirror-pull")
 async def mirror_pull_prices(session: Session = Depends(get_session)):
-    """Pull the latest rate card from the central model-prices service and
-    recompute every historical turn's cost against it. Called by the weekly
+    """Pull the latest rate card from the central model-prices service and,
+    if it changed, recompute every historical turn's cost against it. Called by the weekly
     launchd cron (Monday 05:00); prices are edited in model-prices, not here."""
     result = await pricing.mirror_pull_prices(session)
-    if result["synced"]:
+    if result.get("changed"):
         result["rows_recomputed"] = ingest.recompute_costs()
     return result
 
