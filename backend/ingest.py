@@ -326,7 +326,7 @@ async def price_loop():
     create_db()
     with Session(engine) as session:
         result = await pricing.mirror_pull_prices(session)
-    if result.get("synced"):
+    if result.get("changed"):
         n = await asyncio.to_thread(recompute_costs)
         log.info("repriced %d turns from the mirrored rate card", n)
 
@@ -335,15 +335,21 @@ def recompute_costs() -> int:
     """Reprice every stored turn from the current rate card."""
     with Session(engine) as session:
         fx = pricing.get_fx_rate(session)
-        n = 0
-        for t in session.exec(select(UsageTurn)).all():
-            _price(session, t, fx)
-            session.add(t)
-            n += 1
-            if n % 1000 == 0:
-                session.commit()
-        session.commit()
-        return n
+        n, last_id = 0, 0
+        while True:
+            # One page at a time: loading all the turns at once ran the Docker
+            # VM out of memory and crash-looped the backend at every boot.
+            page = session.exec(select(UsageTurn).where(UsageTurn.id > last_id)
+                                .order_by(UsageTurn.id).limit(1000)).all()
+            if not page:
+                return n
+            last_id = page[-1].id
+            for t in page:
+                _price(session, t, fx)
+                session.add(t)
+            n += len(page)
+            session.commit()
+            session.expunge_all()
 
 
 _WINDOW = re.compile(r"^[a-z0-9_]{1,40}$")

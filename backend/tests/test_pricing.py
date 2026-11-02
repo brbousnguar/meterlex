@@ -73,10 +73,22 @@ def test_mirror_pull_replaces_local_table(session, monkeypatch):
 
     result = asyncio.run(pricing.mirror_pull_prices(session))
 
-    assert result == {"synced": True, "count": 1, "error": None}
+    assert result == {"synced": True, "changed": True, "count": 1, "error": None}
     assert session.get(ModelPrice, "stale-model-no-longer-in-central") is None
     row = session.get(ModelPrice, "claude-sonnet-4-6")
     assert row is not None and row.prompt == 3e-6
+
+
+def test_mirror_pull_reports_an_unchanged_card(session, monkeypatch):
+    payload = [{"model_id": "claude-sonnet-4-6", "prompt": 3e-6, "completion": 15e-6}]
+    monkeypatch.setattr(pricing.httpx, "AsyncClient", lambda *a, **kw: _FakeAsyncClient(payload))
+
+    assert asyncio.run(pricing.mirror_pull_prices(session))["changed"] is True
+    assert asyncio.run(pricing.mirror_pull_prices(session))["changed"] is False
+
+    payload[0]["prompt"] = 4e-6
+    assert asyncio.run(pricing.mirror_pull_prices(session))["changed"] is True
+    assert session.get(ModelPrice, "claude-sonnet-4-6").prompt == 4e-6
 
 
 def test_mirror_pull_keeps_existing_rows_on_empty_response(session, monkeypatch):

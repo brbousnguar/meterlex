@@ -28,6 +28,12 @@ def _is_free(model_id: str) -> bool:
                for p in FREE_MODEL_PREFIXES) or model_id in {"synthetic", "<synthetic>"}
 
 
+def _card(rows: list) -> set:
+    """What a rate card says, without the pull's own timestamp."""
+    return {(r.model_id, r.display_name, r.provider, r.prompt, r.completion,
+             r.cache_read, r.cache_write, r.reasoning, r.source) for r in rows}
+
+
 async def mirror_pull_prices(session: Session) -> dict:
     """Pull the shared rate card from the central model-prices service and
     replace the local mirror with it. Never raises — on failure, logs and
@@ -47,10 +53,7 @@ async def mirror_pull_prices(session: Session) -> dict:
         return {"synced": False, "error": "empty response", "count": 0}
 
     from sqlmodel import select
-    for existing in session.exec(select(ModelPrice)).all():
-        session.delete(existing)
-
-    n = 0
+    incoming = []
     for r in rows:
         row = ModelPrice(model_id=r["model_id"])
         row.display_name = r.get("display_name")
@@ -62,14 +65,21 @@ async def mirror_pull_prices(session: Session) -> dict:
         row.reasoning = r.get("reasoning", 0.0)
         row.source = r.get("source", "seed")
         row.updated_at = datetime.utcnow()
-        session.add(row)
-        n += 1
+        incoming.append(row)
+
+    existing_rows = session.exec(select(ModelPrice)).all()
+    changed = _card(existing_rows) != _card(incoming)
+    for existing in existing_rows:
+        session.delete(existing)
+    session.flush()
+    session.add_all(incoming)
+    n = len(incoming)
     session.commit()
     row = session.get(Setting, "last_price_mirror_pull") or Setting(key="last_price_mirror_pull", value="")
     row.value = datetime.utcnow().isoformat()
     session.add(row)
     session.commit()
-    return {"synced": True, "count": n, "error": None}
+    return {"synced": True, "changed": changed, "count": n, "error": None}
 
 
 def ollama_cloud_id(model_id: str) -> str:
