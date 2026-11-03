@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import Seg, { useThumb } from "./components/Seg";
+import { PullToRefresh, RefreshButton, reload } from "./components/Refresh";
 import { api, QUOTA_WEEKS_BACK, type Overview, type Period } from "./api";
 import { PERIODS, periodLabel, recall, remember, stepRef, UNITS, windowLabel, type Unit } from "./lib";
 import Now from "./screens/Now";
@@ -72,11 +73,12 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const tabs = useThumb<HTMLElement>(tab);
 
-  const load = useCallback(() => {
+  // `read` resolves once the overview is in (the refresh button waits on it); `load` never throws.
+  const read = useCallback(() =>
     api.overview(period, ref)
       .then((d) => { setData(d); setError(null); })
-      .catch((e) => setError(String(e.message ?? e)));
-  }, [period, ref]);
+      .catch((e) => { setError(String(e.message ?? e)); throw e; }), [period, ref]);
+  const load = useCallback(() => void read().catch(() => {}), [read]);
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => {                       // collectors report every 5 minutes
@@ -135,7 +137,9 @@ export default function App() {
               </button>
             ))}
           </nav>
-          <button className="icon-btn" onClick={load} aria-label="Read the meters again" title="Refresh">↻</button>
+          {/* Quota and Credits read their own figures, so there the button reloads the page;
+              elsewhere it re-reads the overview in place and keeps the period in view. */}
+          <RefreshButton onRefresh={tab === "quota" || tab === "credits" ? reload : read} />
         </div>
 
         <div className="period" data-fixed={tab === "quota" || tab === "credits" ? "" : undefined}>
@@ -198,6 +202,9 @@ export default function App() {
         {data && tab === "models"    && <Models data={data} unit={unit} />}
         {tab === "more" && <More onReload={load} />}
       </main>
+
+      {/* The installed app: a pull reloads, so every screen's figures and the newest build come in. */}
+      <PullToRefresh />
     </div>
   );
 }

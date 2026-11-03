@@ -41,6 +41,9 @@ export default function More({ onReload }: { onReload: () => void }) {
     finally { setBusy(false); }
   };
 
+  // An edit not saved yet: a pull to refresh would reload it away, so the section says so.
+  const draft = !!settings && (Object.keys(form) as (keyof Settings)[]).some((k) => form[k] !== settings[k]);
+
   const recompute = async () => {
     setBusy(true);
     try {
@@ -86,7 +89,7 @@ export default function More({ onReload }: { onReload: () => void }) {
         </section>
       )}
 
-      <section className="section">
+      <section className="section" data-draft={draft ? "" : undefined}>
         <div className="section-head">
           <h2 className="section-title">What you pay</h2>
           <div className="section-note">per month, in euros</div>
