@@ -97,6 +97,16 @@
   --shadow-up: 0 18px 36px -18px rgba(31, 42, 68, .4);
   --ease: cubic-bezier(.2, .8, .2, 1);
   --tabs-h: 58px;
+
+  /* The refresh mark: a card-white circle (round even here: the mark turns inside it), a clay
+     ring and fill, and the arrow in --ink-2. Over the sticky header (20); nothing sits higher
+     at the top of the screen. */
+  --refresh-surface:   var(--surface);
+  --refresh-ink:       var(--ink-2);
+  --refresh-accent:    var(--accent);
+  --refresh-on-accent: var(--surface);
+  --refresh-done:      #f8e6dc;
+  --refresh-shadow:    var(--shadow-sm);
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -116,7 +126,6 @@ body {
   font-size: 15.5px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
-  overscroll-behavior-y: none;
 }
 
 button, input, select { font: inherit; color: inherit; border-radius: var(--r); }
@@ -161,11 +170,6 @@ h1, h2, h3, .fig, [data-fig] {
   font-family: var(--mono); font-weight: 600; font-size: .6rem; letter-spacing: .14em;
   text-transform: uppercase; color: var(--accent-ink);
 }
-.icon-btn {
-  display: inline-flex; align-items: center; justify-content: center;
-  min-width: 44px; min-height: 44px; color: var(--ink-2); font-size: 1.1rem;
-}
-.icon-btn:hover { color: var(--ink); }
 
 /* Period control: Day · Week · Month · Year, with steppers, and the unit. */
 .period { display: flex; align-items: center; gap: 10px; padding: 10px 0 12px; flex-wrap: wrap; }
@@ -587,7 +591,7 @@ a.linkout::after { content: "↗"; margin-left: auto; color: var(--accent-ink); 
 
 /* A tap on a phone must not leave a stuck hover state. */
 @media (hover: none) {
-  .icon-btn:hover, .rank-row:hover { color: inherit; background: none; }
+  .rank-row:hover { color: inherit; background: none; }
 }
 @media (hover: hover) {
   .step:not(:disabled):hover, .linkout:not(:disabled):hover { transform: translate(-1px, -1px); box-shadow: 4px 4px 0 var(--ink); }
@@ -737,3 +741,107 @@ a.linkout::after { content: "↗"; margin-left: auto; color: var(--accent-ink); 
 
 /* The Harness / Model switch of the reading over time sits right above the plot it splits. */
 .split-pick { display: flex; justify-content: flex-end; margin: -4px 0 10px; }
+
+/* ── Refresh (house, brb-pwa-mobile-ux). It also holds the rubber-band rule the body had:
+   only the installed app turns overscroll off, so desktop trackpads still scroll. ── */
+/* Refreshing (assets/Refresh.tsx or refresh.js): the header button and pull to refresh share one
+   mark, an arrow that turns while the data loads and a check once it is in.
+
+   Map the tokens to the app's own in its :root (or leave the defaults, Vitalex's look):
+     --refresh-surface    the circle and the button's disc            white
+     --refresh-ink        the arrow at rest                           a dark grey
+     --refresh-accent     the ring, the ready and busy fill, the check an app accent green
+     --refresh-on-accent  the arrow and check on the accent           white
+     --refresh-done       the button's disc while the check shows     a pale accent
+     --refresh-shadow     the pulled circle's lift
+   The circle and the disc stay round in every theme: the mark turns inside them. */
+
+/* The arrow and the check in one cell, cross-fading. Never put `display` or the turn on the
+   circle around them: that is what threw Cooklex's old spinner 8px off centre. */
+.refresh-mark { display: grid; place-items: center; }
+.refresh-mark > svg {
+  grid-area: 1 / 1;
+  display: block;
+  transition: opacity 160ms ease, scale 260ms cubic-bezier(0.3, 1.5, 0.5, 1);
+}
+.refresh-mark .refresh-check { opacity: 0; scale: 0.4; }
+.refresh-mark[data-phase="done"] .refresh-arrow { opacity: 0; scale: 0.4; }
+.refresh-mark[data-phase="done"] .refresh-check { opacity: 1; scale: 1; }
+
+.refresh-sr {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
+
+/* The header button: 44px to tap, a 36px disc inside. */
+.refresh-button {
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+  width: 44px; height: 44px; padding: 0; border: 0; background: none; cursor: pointer;
+  color: var(--refresh-ink, #374151);
+}
+.refresh-disc {
+  display: flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px; border-radius: 9999px;
+  background: var(--refresh-surface, #fff);
+  transition: background-color 200ms ease, color 200ms ease;
+}
+.refresh-button[data-phase="done"] .refresh-disc {
+  background: var(--refresh-done, #f0fdf4);
+  color: var(--refresh-accent, #16a34a);
+}
+.refresh-button:focus-visible { outline: 2px solid var(--refresh-accent, #16a34a); outline-offset: 2px; border-radius: 9999px; }
+/* The installed phone app has the pull instead. */
+@media (display-mode: standalone) and (max-width: 639px) {
+  .refresh-button { display: none; }
+}
+
+/* Pull to refresh: a circle that comes down from above the screen with the finger, a ring filling
+   as it comes; filled with the accent once letting go will refresh, and while it refreshes. Over
+   the header, under the sheets: lower --refresh-z if a sheet sits under 30. */
+.ptr {
+  position: fixed;
+  z-index: var(--refresh-z, 30);
+  top: calc(env(safe-area-inset-top, 0px) - 48px);
+  left: 50%;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 9999px;
+  background: var(--refresh-surface, #fff);
+  color: var(--refresh-ink, #374151);
+  box-shadow: var(--refresh-shadow, 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1));
+  opacity: 0;
+  pointer-events: none;
+  transition: transform 280ms cubic-bezier(0.2, 0.9, 0.3, 1), opacity 200ms ease, background-color 160ms ease, color 160ms ease;
+}
+.ptr > * { grid-area: 1 / 1; }
+.ptr:not([data-state="idle"]) { opacity: 1; }
+/* While the finger is on it, it follows the finger. */
+.ptr[data-state="pull"],
+.ptr[data-state="ready"] { transition: background-color 160ms ease, color 160ms ease; }
+.ptr[data-state="ready"],
+.ptr[data-state="busy"],
+.ptr[data-state="done"] { background: var(--refresh-accent, #16a34a); color: var(--refresh-on-accent, #fff); }
+.ptr-ring {
+  width: 40px;
+  height: 40px;
+  rotate: -90deg;
+  fill: none;
+  stroke: var(--refresh-accent, #16a34a);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+}
+.ptr:not([data-state="pull"]) .ptr-ring { opacity: 0; }
+
+/* Only the installed app pulls. Scope the page's own rubber band off to it: `touch-action` and
+   `overscroll-behavior` set globally also stop trackpad scrolling in desktop Chromium. */
+@media (display-mode: standalone) {
+  html, body { overscroll-behavior-y: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ptr, .refresh-mark > svg, .refresh-disc { transition: none; }
+  /* Nothing turns (the script checks too); the arrow dims while it loads. */
+  .refresh-mark[data-phase="busy"] .refresh-arrow { opacity: 0.45; }
+}

@@ -343,6 +343,9 @@ function Balance({ c, onSaved }: { c: PrepaidData; onSaved: (c: PrepaidData) => 
 function BalanceForm({ c, onSaved }: { c: PrepaidData; onSaved: (c: PrepaidData) => void }) {
   const [value, setValue] = useState(c.balance_set ? c.balance_set.usd.toFixed(2) : "");
   const [topup, setTopup] = useState(c.balance_set?.topped_up ?? "");
+  // What the form last held saved: anything else is a draft a pull to refresh must not drop.
+  const [saved, setSaved] = useState({ value, topup });
+  const draft = value !== saved.value || topup !== saved.topup;
   const today = new Date().toISOString().slice(0, 10);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
@@ -352,14 +355,15 @@ function BalanceForm({ c, onSaved }: { c: PrepaidData; onSaved: (c: PrepaidData)
       .then((d) => {
         onSaved(d);
         setNote(usd === null ? "Cleared." : "Saved. What was spent from now on comes off it.");
-        if (usd === null) { setValue(""); setTopup(""); }
+        if (usd === null) { setValue(""); setTopup(""); setSaved({ value: "", topup: "" }); }
+        else setSaved({ value, topup });
       })
       .catch((e) => setNote(`Not saved (${String(e.message ?? e)}).`))
       .finally(() => setBusy(false));
   };
   const usd = parseFloat(value);
   return (
-    <section className="section">
+    <section className="section" data-draft={draft ? "" : undefined}>
       <div className="section-head">
         <h2 className="section-title">Balance on the billing page</h2>
         <div className="section-note">platform.openai.com → Settings → Billing</div>
