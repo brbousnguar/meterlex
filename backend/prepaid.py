@@ -7,6 +7,11 @@ with the day's spend at that moment, less what was spent since. With the day
 of the last top-up beside it (#79), the meter measures what was spent since that
 top-up out of what the account held after it.
 
+The costs API runs a few hours behind, so the day's spend kept with the balance
+can miss what was spent before it was read (#89). The usage API has hours: the
+hub asks the collector for the hours of the day the balance was read, and counts
+that day's spend after the reading as the share of its usage that came after it.
+
 Amounts are micro-dollars in the tables and dollars out. The rate is the last
 seven days: OpenRouter's from its own readings, OpenAI's from its full days.
 """
@@ -28,6 +33,10 @@ MICRO = 1_000_000
 # the balance read on the OpenAI billing page, the day's spend when it was saved, and the last top-up's day
 OPENAI_BALANCE, OPENAI_BALANCE_AT, OPENAI_BALANCE_DAY_SPENT, OPENAI_TOPUP_DAY = (
     "openai_balance_usd", "openai_balance_at", "openai_balance_day_spent", "openai_topup_day")
+# the share of that day's usage after the reading (#89), and whether the whole day was in when it was taken
+OPENAI_AFTER_SHARE, OPENAI_SHARE_FINAL = "openai_balance_after_share", "openai_balance_share_final"
+HOUR = timedelta(hours=1)
+SETTLED_AFTER = timedelta(hours=2)    # the usage API's hours are in this long after the day ends
 
 
 def _iso(dt: Optional[datetime]) -> Optional[str]:
@@ -61,15 +70,17 @@ def _setting(session: Session, key: str) -> str:
 
 
 def anchor(session: Session) -> Optional[dict]:
-    """The OpenAI balance as last saved: {usd, at, day_spent, topped_up} or None."""
+    """The OpenAI balance as last saved: {usd, at, day_spent, topped_up, after_share, share_final} or None."""
     usd, at = _setting(session, OPENAI_BALANCE), _setting(session, OPENAI_BALANCE_AT)
     if not usd or not at:
         return None
     try:
-        topup = _setting(session, OPENAI_TOPUP_DAY)
+        topup, share = _setting(session, OPENAI_TOPUP_DAY), _setting(session, OPENAI_AFTER_SHARE)
         return {"usd": float(usd), "at": datetime.fromisoformat(at),
                 "day_spent": int(_setting(session, OPENAI_BALANCE_DAY_SPENT) or 0),
-                "topped_up": date.fromisoformat(topup) if topup else None}
+                "topped_up": date.fromisoformat(topup) if topup else None,
+                "after_share": float(share) if share else None,
+                "share_final": _setting(session, OPENAI_SHARE_FINAL) == "1"}
     except ValueError:
         return None
 
@@ -83,11 +94,38 @@ def save_anchor(session: Session, usd: Optional[float], now: datetime, topped_up
               if usd is None else
               {OPENAI_BALANCE: f"{usd:.2f}", OPENAI_BALANCE_AT: now.isoformat(timespec="seconds"),
                OPENAI_BALANCE_DAY_SPENT: str(spent), OPENAI_TOPUP_DAY: topped_up.isoformat() if topped_up else ""})
+    _save(session, {**values, OPENAI_AFTER_SHARE: "", OPENAI_SHARE_FINAL: ""})   # a new reading, a new share
+
+
+def _save(session: Session, values: dict) -> None:
     for key, value in values.items():
         row = session.get(Setting, key) or Setting(key=key)
         row.value = value
         session.add(row)
     session.commit()
+
+
+def hours_wanted(session: Session) -> Optional[str]:
+    """The UTC day whose usage hours the hub still needs, the day the balance was read, or None."""
+    a = anchor(session)
+    return None if a is None or a["share_final"] else a["at"].date().isoformat()
+
+
+def take_hours(session: Session, hours: list, read: datetime) -> None:
+    """Keep the share of the reading's day usage that came after the reading, from the
+    usage API's hours [(start, weight)] read at `read`, naive UTC; the reading's own
+    hour is split by its minutes. A day with no usage on record keeps the day_spent rule."""
+    a = anchor(session)
+    if a is None or a["share_final"]:
+        return
+    start = datetime.combine(a["at"].date(), datetime.min.time())
+    day = [(h, w) for h, w in hours if start <= h < start + DAY]
+    if not day:
+        return
+    total = sum(w for _, w in day)
+    after = sum(w if h >= a["at"] else w * max(0.0, (h + HOUR - a["at"]) / HOUR) for h, w in day)
+    _save(session, {OPENAI_AFTER_SHARE: f"{after / total:.6f}" if total else "",
+                    OPENAI_SHARE_FINAL: "1" if read >= start + DAY + SETTLED_AFTER else ""})
 
 
 def _rate_openrouter(session: Session, latest: BalanceReading, now: datetime) -> Optional[int]:
@@ -136,7 +174,10 @@ def view(session: Session, now: datetime, tz: ZoneInfo, provider: str) -> dict:
         if a is not None:
             at_day = a["at"].date()
             after = sum(n for d, n in days.items() if date.fromisoformat(d) > at_day)
-            on_day = max(0, days.get(at_day.isoformat(), 0) - a["day_spent"])
+            day_total = days.get(at_day.isoformat(), 0)
+            # the reading's day: its share of usage after the reading, once the hours are in (#89)
+            on_day = (round(day_total * a["after_share"]) if a["after_share"] is not None
+                      else max(0, day_total - a["day_spent"]))
             out["spent_since_balance"] = _usd(after + on_day)
             left = round(a["usd"] * MICRO) - after - on_day
             # what the account held after the top-up: what is left plus all spent from that day on. The
@@ -146,7 +187,7 @@ def view(session: Session, now: datetime, tz: ZoneInfo, provider: str) -> dict:
             if t is not None and start <= t <= today:
                 since = sum(n for d, n in days.items() if date.fromisoformat(d) >= t)
                 if t == at_day:
-                    since -= min(a["day_spent"], days.get(t.isoformat(), 0))
+                    since -= day_total - on_day
                 out["topped_up"] = {"day": t.isoformat(), "held": _usd(left + since), "spent": _usd(since)}
         full = [today - timedelta(days=i) for i in range(1, RATE_DAYS + 1)]
         if start <= full[-1]:

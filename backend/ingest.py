@@ -16,6 +16,7 @@ from sqlmodel import Session, select
 
 from database import engine, create_db
 from models import BalanceReading, CreditDay, CreditReading, Machine, QuotaReading, UsageTurn
+import prepaid
 import pricing
 
 log = logging.getLogger("meterlex.ingest")
@@ -394,6 +395,7 @@ CREDIT_PROVIDERS = {"elevenlabs"}
 _DAY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 MAX_CREDITS_PER_BATCH = 50
 MAX_CREDIT_DAYS = 400
+MAX_USAGE_HOURS = 48     # the usage hours of a reading's day (#89)
 
 
 def _count(value) -> int:
@@ -472,17 +474,22 @@ def ingest_balances(session: Session, machine: Machine, readings: list) -> dict:
             if provider not in BALANCE_PROVIDERS:
                 raise ValueError(provider)
             bought, used = _micro(raw.get("bought")), _micro(raw.get("used"))
-            ts = datetime.fromisoformat(str(raw["ts"]).replace("Z", "+00:00"))
-            ts = ts if ts.tzinfo is None else ts.astimezone(timezone.utc).replace(tzinfo=None)
+            ts = _utc(raw["ts"])
             days = raw.get("days") or []
             if not isinstance(days, list) or len(days) > MAX_CREDIT_DAYS:
                 raise ValueError("days")
             days = [(str(d["day"]), _count(d["spent"])) for d in days]
             if any(not _DAY.match(day) for day, _ in days):
                 raise ValueError("day")
+            hours = raw.get("hours") or []
+            if not isinstance(hours, list) or len(hours) > MAX_USAGE_HOURS or (hours and provider != "openai"):
+                raise ValueError("hours")
+            hours = [(_utc(h["start"]), _count(h["weight"])) for h in hours]
         except (KeyError, TypeError, ValueError, OverflowError, OSError):
             counts["rejected"] += 1
             continue
+        if hours:
+            prepaid.take_hours(session, hours, min(ts, now))     # settled or not as of when they were read
         seen = session.exec(select(BalanceReading).where(
             BalanceReading.provider == provider, BalanceReading.ts == ts, BalanceReading.machine == machine.name,
         )).first()
@@ -505,7 +512,16 @@ def ingest_balances(session: Session, machine: Machine, readings: list) -> dict:
         session.flush()
         counts["inserted"] += 1
     session.commit()
+    wanted = prepaid.hours_wanted(session)
+    if wanted:
+        counts["openai_hours"] = wanted       # the collector sends that day's usage hours next time
     return counts
+
+
+def _utc(value) -> datetime:
+    """An ISO time as naive UTC."""
+    t = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    return t if t.tzinfo is None else t.astimezone(timezone.utc).replace(tzinfo=None)
 
 
 def _set_day(session: Session, provider: str, day: str, n: int, now: datetime) -> None:

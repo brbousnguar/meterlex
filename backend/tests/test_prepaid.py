@@ -100,6 +100,66 @@ def test_openai_left_is_the_saved_balance_less_what_was_spent_since(session):
     assert prepaid.view(session, T0, PARIS, "openai")["balance_set"] is None
 
 
+def _hours(day: str, usage: dict) -> list:
+    return [{"start": f"{day}T{h:02d}:00:00+00:00", "weight": w} for h, w in usage.items()]
+
+
+def test_the_reading_day_counts_the_usage_after_the_balance_was_read(session):
+    m = _machine(session)
+    read = datetime(2026, 10, 25, 11, 30)
+    ingest.ingest_balances(session, m, [_oa(read, {"2026-10-25": 3.0})])     # the costs API had $3 of the day then
+    prepaid.save_anchor(session, 20.0, read, date(2026, 10, 25))
+    assert prepaid.hours_wanted(session) == "2026-10-25"
+    later = read + timedelta(hours=1)
+    usage = {9: 400, 10: 200, 11: 200, 12: 0}                 # half the 11:00 hour after 11:30: 100 of 800
+    r = ingest.ingest_balances(session, m, [{**_oa(later, {"2026-10-25": 3.0}), "hours": _hours("2026-10-25", usage)}])
+    assert r["inserted"] == 1 and r["openai_hours"] == "2026-10-25"     # the day isn't over: ask again
+    assert prepaid.anchor(session)["after_share"] == 0.125
+
+    # the day closes at $6: the costs API's late $3 was spent before the reading, so most of it was in the $20
+    days = {"2026-10-25": 6.0, "2026-10-26": 1.0}
+    nextday = read + timedelta(days=1)
+    r = ingest.ingest_balances(session, m, [{**_oa(nextday, days), "hours": _hours("2026-10-25", usage)}])
+    assert "openai_hours" not in r and prepaid.hours_wanted(session) is None
+    v = prepaid.view(session, nextday, PARIS, "openai")
+    assert v["spent_since_balance"] == 1.75 and v["left"] == 18.25            # $6 x 0.125 + the 26th's $1
+    assert v["topped_up"] == {"day": "2026-10-25", "held": 20.0, "spent": 1.75}
+    late = {**_oa(nextday + timedelta(hours=1), days), "hours": _hours("2026-10-25", {12: 800})}
+    ingest.ingest_balances(session, m, [late])
+    assert prepaid.anchor(session)["after_share"] == 0.125                    # a settled day keeps its share
+
+    prepaid.save_anchor(session, 18.0, nextday)                               # a new reading starts over
+    a = prepaid.anchor(session)
+    assert a["after_share"] is None and a["share_final"] is False
+    assert prepaid.hours_wanted(session) == "2026-10-26"
+    ingest.ingest_balances(session, m, [{**_oa(nextday + timedelta(hours=2), days),
+                                        "hours": _hours("2026-10-25", usage)}])
+    assert prepaid.anchor(session)["after_share"] is None                     # another day's hours don't count
+
+
+def test_without_usage_hours_the_day_spend_at_the_reading_is_taken_off(session):
+    m = _machine(session)
+    read = datetime(2026, 10, 25, 11, 30)
+    ingest.ingest_balances(session, m, [_oa(read, {"2026-10-25": 3.0})])
+    prepaid.save_anchor(session, 20.0, read)
+    nextday = read + timedelta(days=1)
+    quiet = _hours("2026-10-25", {9: 0, 10: 0})                               # no usage on record that day
+    ingest.ingest_balances(session, m, [{**_oa(nextday, {"2026-10-25": 6.0}), "hours": quiet}])
+    assert prepaid.anchor(session)["after_share"] is None and prepaid.hours_wanted(session) is None
+    assert prepaid.view(session, nextday, PARIS, "openai")["left"] == 17.0
+
+
+def test_bad_usage_hours_are_rejected(session):
+    m = _machine(session)
+    good = _oa(T0, {"2026-10-20": 1.0})
+    bad = [{**_or(T0, 80.0), "hours": _hours("2026-10-20", {9: 1})},         # only OpenAI sends hours
+           {**good, "hours": {"9": 1}},
+           {**good, "hours": [{"start": "2026-10-20T09:00:00Z", "weight": 1}] * 49},
+           {**good, "hours": [{"start": "nine", "weight": 1}]},
+           {**good, "hours": [{"start": "2026-10-20T09:00:00Z", "weight": -1}]}]
+    assert ingest.ingest_balances(session, m, bad)["rejected"] == 5
+
+
 def test_the_api_takes_both_providers_and_the_openai_balance(client):
     assert client.get("/api/credits?provider=openrouter").json()["reading"] is None
     assert client.get("/api/credits?provider=elevenlabs").json()["provider"] == "elevenlabs"

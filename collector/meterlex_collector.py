@@ -41,7 +41,7 @@ from pathlib import Path
 from typing import Iterator, Optional
 from urllib.parse import urlparse
 
-VERSION = "0.9.1"
+VERSION = "0.9.2"
 BATCH = 1000               # turns per POST
 SPOOL_MAX = 500_000        # unsent turns kept on disk before the oldest are dropped
 HOME = Path.home()
@@ -1603,6 +1603,9 @@ def cmd_credits(args) -> int:
 # admin key (OPENAI_ADMIN_KEY, or "openai_env"); the hub keeps the balance read
 # on the billing page. `run` reads both at most every CREDITS_EVERY_S and sends
 # them as `balances`, in micro-dollars. Each key only goes to its own provider.
+# The costs API runs hours behind, so the hub can name a day (`openai_hours` in
+# its reply) whose usage by the hour it needs to split around the balance read
+# that day (#89); the next reading carries those hours.
 
 BALANCES = {   # provider: (variable, config.json key, name)
     "openrouter": ("OPENROUTER_API_KEY", "openrouter_env", "OpenRouter"),
@@ -1646,7 +1649,34 @@ def openai_days(pages: list) -> list:
     return [{"day": d, "spent": n} for d, n in sorted(days.items())]
 
 
-def read_balance(provider: str, key: str, now: float) -> tuple[Optional[dict], Optional[str]]:
+def openai_hours(body: dict) -> list:
+    """The usage API's hourly buckets as [{start, weight}], weight = input + output tokens."""
+    hours = []
+    for bucket in body.get("data") or []:
+        try:
+            start = datetime.fromtimestamp(int(bucket["start_time"]), tz=timezone.utc).isoformat()
+            weight = sum(int(r.get("input_tokens") or 0) + int(r.get("output_tokens") or 0)
+                         for r in bucket.get("results") or [])
+        except (KeyError, TypeError, ValueError, OverflowError, OSError):
+            continue
+        hours.append({"start": start, "weight": weight})
+    return hours
+
+
+def read_usage_hours(key: str, day: str) -> Optional[list]:
+    """A UTC day's usage by the hour, or None when it can't be read (the reading still goes)."""
+    try:
+        start = int(datetime.fromisoformat(day).replace(tzinfo=timezone.utc).timestamp())
+        url = (f"{OPENAI}/v1/organization/usage/completions?start_time={start}"
+               f"&end_time={start + 86_400}&bucket_width=1h&limit=24")
+        return openai_hours(_get_json(url, key))
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        print(f"balances: OpenAI usage hours for {day} unread ({exc.__class__.__name__})", file=sys.stderr)
+        return None
+
+
+def read_balance(provider: str, key: str, now: float,
+                 hours_day: Optional[str] = None) -> tuple[Optional[dict], Optional[str]]:
     name = BALANCES[provider][2]
     try:
         if provider == "openrouter":
@@ -1661,8 +1691,12 @@ def read_balance(provider: str, key: str, now: float) -> tuple[Optional[dict], O
             page = body.get("next_page") if body.get("has_more") else None
             if not page:
                 break
-        return ({"provider": "openai", "ts": datetime.fromtimestamp(now, tz=timezone.utc).isoformat(),
-                 "days": openai_days(pages)}, None)
+        reading = {"provider": "openai", "ts": datetime.fromtimestamp(now, tz=timezone.utc).isoformat(),
+                   "days": openai_days(pages)}
+        hours = read_usage_hours(key, hours_day) if hours_day else None
+        if hours:
+            reading["hours"] = hours
+        return reading, None
     except urllib.error.HTTPError as exc:
         hint = " (the costs API needs an admin key)" if provider == "openai" and exc.code in (401, 403) else ""
         return None, f"{name} answered {exc.code}{hint}"
@@ -1689,7 +1723,7 @@ def balances_flush(cfg: dict, state: dict, now: float) -> tuple[int, Optional[st
         st = mine.setdefault(provider, {})
         if now - st.get("at", 0) < CREDITS_EVERY_S:
             continue
-        reading, st["error"] = read_balance(provider, key, now)
+        reading, st["error"] = read_balance(provider, key, now, st.get("hours_day"))
         if st["error"]:
             print(f"balances: {st['error']}", file=sys.stderr)
         elif reading:
@@ -1698,13 +1732,15 @@ def balances_flush(cfg: dict, state: dict, now: float) -> tuple[int, Optional[st
         return 0, None
     body = {"collector": VERSION, "machine": cfg["machine"], "turns": [], "balances": readings}
     try:
-        _hub(cfg, "/api/ingest", body)
+        reply = _hub(cfg, "/api/ingest", body)
     except urllib.error.HTTPError as exc:
         return 0, f"hub answered {exc.code} to the balances"
     except (urllib.error.URLError, OSError, ValueError) as exc:
         return 0, f"hub unreachable for the balances: {exc}"
     for r in readings:
         mine[r["provider"]].update({"at": int(now), "last": _balance_text(r), "read": r["ts"]})
+    if "openai" in mine:
+        mine["openai"]["hours_day"] = ((reply or {}).get("balances") or {}).get("openai_hours")
     return len(readings), None
 
 
