@@ -755,6 +755,49 @@ def test_prepaid_balances_read_each_provider_with_its_own_key(tmp_path, monkeypa
     assert mc.balances_flush({"machine": "m"}, {}, 2_000_000_000.0) == (0, None)       # no key, nothing asked
 
 
+OPENAI_USAGE_HOURS = {"object": "page", "has_more": False, "data": [
+    {"start_time": 1761382800, "end_time": 1761386400, "results": [         # 2025-10-25 09:00 UTC
+        {"input_tokens": 1200, "output_tokens": 300, "model": None},
+        {"input_tokens": 100, "output_tokens": 0, "model": None}]},
+    {"start_time": 1761386400, "end_time": 1761390000, "results": []},
+]}
+
+
+def test_the_hub_names_a_day_and_the_next_openai_reading_carries_its_usage_hours(monkeypatch):
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_ADMIN_KEY", "sk-admin-test")
+    asked, sent = [], []
+
+    def fake_get(url, key):
+        asked.append(url)
+        if "/usage/" in url:
+            return OPENAI_USAGE_HOURS
+        return OPENAI_COSTS
+
+    monkeypatch.setattr(mc, "_get_json", fake_get)
+    monkeypatch.setattr(mc, "_hub", lambda cfg, path, body=None:
+                        sent.append(body) or {"balances": {"inserted": 1, "openai_hours": "2025-10-25"}})
+    state, now = {}, 2_000_000_000.0
+    assert mc.balances_flush({"machine": "m"}, state, now) == (1, None)
+    assert "hours" not in sent[0]["balances"][0] and not any("/usage/" in u for u in asked)
+    assert state["balances"]["openai"]["hours_day"] == "2025-10-25"
+    assert mc.balances_flush({"machine": "m"}, state, now + 900) == (1, None)
+    assert sent[1]["balances"][0]["hours"] == [{"start": "2025-10-25T09:00:00+00:00", "weight": 1600},
+                                               {"start": "2025-10-25T10:00:00+00:00", "weight": 0}]
+    assert ("/v1/organization/usage/completions?start_time=1761350400&end_time=1761436800"
+            "&bucket_width=1h&limit=24") in asked[-1]
+
+    def no_usage(url, key):
+        if "/usage/" in url:
+            raise urllib.error.HTTPError(url, 500, "oops", {}, None)
+        return OPENAI_COSTS
+
+    monkeypatch.setattr(mc, "_get_json", no_usage)
+    monkeypatch.setattr(mc, "_hub", lambda cfg, path, body=None: sent.append(body) or {"balances": {}})
+    assert mc.balances_flush({"machine": "m"}, state, now + 1800) == (1, None)   # the reading still goes
+    assert "hours" not in sent[2]["balances"][0] and state["balances"]["openai"]["hours_day"] is None
+
+
 def test_a_project_key_on_the_costs_api_says_an_admin_key_is_needed(monkeypatch):
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     monkeypatch.setenv("OPENAI_ADMIN_KEY", "sk-proj-test")
