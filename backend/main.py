@@ -874,6 +874,18 @@ def put_openai_balance(payload: dict, session: Session = Depends(get_session)):
     return prepaid.view(session, datetime.utcnow(), LOCAL_TZ, "openai")
 
 
+@app.put("/api/credits/openrouter/start")
+def put_openrouter_start(payload: dict, session: Session = Depends(get_session)):
+    """{"start": true} measures the OpenRouter meter from its latest reading, {"start": false} goes
+    back to the last top-up (#93). 409 with no reading to start from."""
+    on = payload.get("start")
+    if not isinstance(on, bool):
+        raise HTTPException(400, "start must be true or false")
+    if not prepaid.start_over(session, on):
+        raise HTTPException(409, "no OpenRouter reading to start from yet")
+    return prepaid.view(session, datetime.utcnow(), LOCAL_TZ, "openrouter")
+
+
 @app.post("/api/credits/openai/credits")
 def add_openai_credits(payload: dict, session: Session = Depends(get_session)):
     """Credits just bought on the OpenAI billing page, in dollars before tax ({"usd": 20}): they are
