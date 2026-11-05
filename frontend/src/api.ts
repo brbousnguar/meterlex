@@ -353,8 +353,11 @@ export type Prepaid = {
   reading: { at: string; machine: string; stale: boolean } | null;
   /** `topped_up` is the day of the last top-up, typed with the balance (#79) or the day credits were added (#91) */
   balance_set?: { usd: number; at: string; topped_up: string | null; added: { usd: number; at: string }[] } | null;
-  /** OpenAI: what the account held after the last top-up (what is left plus all spent since), the meter's whole */
-  topped_up?: { day: string; held: number; spent: number } | null;
+  /** what the account held after the last top-up (what is left plus all spent since), the meter's whole; OpenRouter
+   *  finds its top-ups in its readings, or starts over from one he chose (`from`, #93) */
+  topped_up?: { day: string; held: number; spent: number; from?: "top-up" | "start" } | null;
+  /** OpenRouter: the reading the meter was started over from, if any (#93) */
+  started?: string | null;
   bought?: number | null;
   used?: number | null;
   spent_since_balance?: number;
@@ -375,6 +378,8 @@ export const api = {
     put<Prepaid>("/api/credits/openai/balance", { usd, topped_up: toppedUp }),
   /** credits just bought on the OpenAI billing page, before tax: added to the balance, today the top-up day (#91) */
   addOpenAICredits: (usd: number) => post<Prepaid>("/api/credits/openai/credits", { usd }),
+  /** measure the OpenRouter meter from its latest reading; false goes back to the last top-up (#93) */
+  startOpenRouterOver: (start: boolean) => put<Prepaid>("/api/credits/openrouter/start", { start }),
   quota: (back = 0) => get<Quota>(`/api/quota${back ? `?back=${back}` : ""}`),
   credits: (provider = "elevenlabs") => get<Credits>(`/api/credits?provider=${encodeURIComponent(provider)}`),
   health: () => get<Health>("/api/health"),

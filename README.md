@@ -320,7 +320,10 @@ OpenAI) shows one at a time.
 - **OpenRouter** reports what the account bought and used, all time, to any of
   its API keys (`GET /api/v1/credits`), so the balance is its own figure. What
   was used since the reading before goes to that reading's UTC day: the days
-  start with the first reading.
+  start with the first reading. A rise in what was bought between two readings
+  is a top-up: the meter measures what was spent since the last one out of what
+  the account held after it. **Start over** measures from what is left now
+  instead, until the next top-up; Undo goes back.
 - **OpenAI** has no API for the balance. Its costs API (`/v1/organization/costs`)
   gives the spend by UTC day, and only to an **admin key** (platform.openai.com →
   Settings → Organization → Admin keys; a project key answers 403). Type the

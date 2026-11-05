@@ -56,6 +56,32 @@ def test_openrouter_balance_rate_and_the_day_it_runs_out(session):
     assert prepaid.view(session, now + timedelta(hours=2), PARIS, "openrouter")["reading"]["stale"] is True
 
 
+
+def test_openrouter_measures_from_the_last_top_up_or_where_it_started_over(session):
+    m = _machine(session)
+    assert prepaid.start_over(session, True) is False                         # no reading to start from
+    ingest.ingest_balances(session, m, [_or(T0, 80.0), _or(T0 + timedelta(hours=1), 81.0)])
+    v = prepaid.view(session, T0 + timedelta(hours=1), PARIS, "openrouter")
+    assert v["topped_up"] is None and v["started"] is None and v["left"] == 9.0    # no top-up on record
+    # $20 bought between the 10:00 and 11:00 readings, $0.50 spent meanwhile: it counts as after
+    ingest.ingest_balances(session, m, [_or(T0 + timedelta(hours=2), 81.5, bought=110.0),
+                                        _or(T0 + timedelta(days=1), 84.0, bought=110.0)])
+    v = prepaid.view(session, T0 + timedelta(days=1), PARIS, "openrouter")
+    assert v["left"] == 26.0 and v["bought"] == 110.0
+    assert v["topped_up"] == {"day": "2026-10-20", "held": 29.0, "spent": 3.0, "from": "top-up"}
+
+    assert prepaid.start_over(session, True) is True
+    v = prepaid.view(session, T0 + timedelta(days=1), PARIS, "openrouter")
+    assert v["topped_up"] == {"day": "2026-10-21", "held": 26.0, "spent": 0.0, "from": "start"}
+    assert v["started"] == "2026-10-21T09:00:00Z"
+    ingest.ingest_balances(session, m, [_or(T0 + timedelta(days=2), 85.0, bought=110.0)])
+    assert prepaid.view(session, T0 + timedelta(days=2), PARIS, "openrouter")["topped_up"]["spent"] == 1.0
+    ingest.ingest_balances(session, m, [_or(T0 + timedelta(days=3), 85.0, bought=130.0)])   # a later top-up wins
+    v = prepaid.view(session, T0 + timedelta(days=3), PARIS, "openrouter")
+    assert v["topped_up"] == {"day": "2026-10-23", "held": 45.0, "spent": 0.0, "from": "top-up"}
+    prepaid.start_over(session, False)
+    assert prepaid.view(session, T0 + timedelta(days=3), PARIS, "openrouter")["started"] is None
+
 def test_no_rate_from_a_few_hours(session):
     m = _machine(session)
     ingest.ingest_balances(session, m, [_or(T0, 80.0), _or(T0 + timedelta(hours=2), 81.0)])
@@ -208,6 +234,18 @@ def test_the_api_takes_both_providers_and_the_openai_balance(client):
     assert client.put("/api/credits/openai/balance", json={"usd": None}).json()["balance_set"] is None
     assert client.get("/api/settings").status_code == 200                  # the balance keys stay out of settings
 
+
+
+def test_the_api_starts_openrouter_over(client, engine):
+    from sqlmodel import Session
+    assert client.put("/api/credits/openrouter/start", json={"start": True}).status_code == 409
+    assert client.put("/api/credits/openrouter/start", json={"start": "yes"}).status_code == 400
+    with Session(engine) as s:
+        ingest.ingest_balances(s, _machine(s), [_or(T0, 80.0)])
+    r = client.put("/api/credits/openrouter/start", json={"start": True})
+    assert r.status_code == 200 and r.json()["topped_up"]["from"] == "start" and r.json()["topped_up"]["held"] == 10.0
+    r = client.put("/api/credits/openrouter/start", json={"start": False})
+    assert r.status_code == 200 and r.json()["topped_up"] is None and r.json()["started"] is None
 
 def test_ingest_takes_balances(client, engine):
     from sqlmodel import Session

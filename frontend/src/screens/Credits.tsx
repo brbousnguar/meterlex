@@ -236,9 +236,11 @@ function Balance({ c, onSaved }: { c: PrepaidData; onSaved: (c: PrepaidData) => 
   const s = c.spent;
   const left = c.left ?? null;
   const fill = PREPAID_FILL[c.provider];
-  // the share gone, of what was bought (OpenRouter), or of what the account held after the last top-up, else of
-  // the balance saved from the billing page (OpenAI)
-  const whole = c.provider === "openrouter" ? c.bought ?? null : c.topped_up?.held ?? c.balance_set?.usd ?? null;
+  // the share gone, of what the account held after the last top-up (or where OpenRouter started over), else of
+  // all that was bought (OpenRouter) or of the balance saved from the billing page (OpenAI)
+  const whole = c.topped_up?.held ?? (c.provider === "openrouter" ? c.bought : c.balance_set?.usd) ?? null;
+  const held = (t: NonNullable<PrepaidData["topped_up"]>) => <>left of the {fmtUsd(t.held)} held {t.from === "start"
+    ? "when you started over" : "after the top-up"} {dayDate(`${t.day}T12:00:00Z`)} · {fmtUsd(t.spent)} spent since</>;
   const gone = whole && left !== null ? Math.max(0, Math.min(100, 100 * (1 - left / whole))) : null;
   const short = c.lasts_days != null && c.lasts_days < 7;
   const monthSpent = (c.days ?? []).reduce((a, d) => a + d.spent, 0);
@@ -261,9 +263,10 @@ function Balance({ c, onSaved }: { c: PrepaidData; onSaved: (c: PrepaidData) => 
           <span className="quota-of">
             {c.provider === "openrouter"
               ? (left === null ? <>OpenRouter sent no balance</>
+                : c.topped_up ? held(c.topped_up)
                 : <>left of {fmtUsd(c.bought ?? 0)} bought · {fmtUsd(c.used ?? 0)} spent in all</>)
               : c.balance_set && c.topped_up
-                ? <>left of the {fmtUsd(c.topped_up.held)} held after the top-up {dayDate(`${c.topped_up.day}T12:00:00Z`)} · {fmtUsd(c.topped_up.spent)} spent since</>
+                ? held(c.topped_up)
               : c.balance_set
                 ? <>left of the {fmtUsd(c.balance_set.usd)} on the billing page {dayDate(c.balance_set.at)} · {fmtUsd(c.spent_since_balance ?? 0)} spent since</>
                 : <>no balance yet: type the one on the billing page below, and what OpenAI shows spent from then on comes off it</>}
@@ -284,6 +287,9 @@ function Balance({ c, onSaved }: { c: PrepaidData; onSaved: (c: PrepaidData) => 
           {c.runs_out_at && left !== null && left > 0 && (
             <span className="rank-sub">at {fmtUsd(c.per_day ?? 0)} a day, used up around {dayDate(c.runs_out_at)}</span>
           )}
+          {c.provider === "openrouter" && c.topped_up && (
+            <span className="rank-sub">{fmtUsd(c.bought ?? 0)} bought, {fmtUsd(c.used ?? 0)} spent in all</span>
+          )}
           {(c.balance_set?.added ?? []).map((x) => (
             <span key={x.at} className="rank-sub">{fmtUsd(x.usd)} added {dayDate(x.at)}</span>
           ))}
@@ -292,6 +298,7 @@ function Balance({ c, onSaved }: { c: PrepaidData; onSaved: (c: PrepaidData) => 
       </section>
 
       {c.provider === "openai" && (c.balance_set ? <OpenAIActions c={c} onSaved={onSaved} /> : <BalanceForm c={c} onSaved={onSaved} />)}
+      {c.provider === "openrouter" && left !== null && <OpenRouterActions c={c} onSaved={onSaved} />}
 
       <section className="section bare">
         <div className="rail lift">
@@ -331,7 +338,8 @@ function Balance({ c, onSaved }: { c: PrepaidData; onSaved: (c: PrepaidData) => 
           ? <>The figures are OpenRouter's own: the collector on the machine that holds an API key asks for what
               the account bought and used, all time, at most every 15 minutes. What was used since the reading
               before goes to that reading's day, so the days start with the first reading. The key never leaves
-              that machine.</>
+              that machine. A top-up shows by itself as a rise in what was bought: the bar measures from the
+              last one, or from where you started over.</>
           : <>OpenAI has no API for the balance. The spend by day comes from its costs API, read with an admin key
               by the collector on the machine that holds it, at most every 15 minutes; it can lag a few hours.
               What is left is the balance you typed from the billing page, plus the credits added since, less
@@ -359,6 +367,53 @@ function OpenAIActions({ c, onSaved }: { c: PrepaidData; onSaved: (c: PrepaidDat
       </section>
       {open === "add" && <AddCredits onSaved={onSaved} />}
       {open === "again" && <BalanceForm c={c} onSaved={onSaved} again />}
+    </>
+  );
+}
+
+/** OpenRouter reports its top-ups itself; Start over measures from what is left now instead (#93). */
+function OpenRouterActions({ c, onSaved }: { c: PrepaidData; onSaved: (c: PrepaidData) => void }) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  const set = (start: boolean) => {
+    setBusy(true);
+    api.startOpenRouterOver(start)
+      .then((d) => {
+        onSaved(d);
+        setNote(start ? "Started over: the bar measures from what is left now." : "Back to the last top-up.");
+      })
+      .catch((e) => setNote(`Not saved (${String(e.message ?? e)}).`))
+      .finally(() => setBusy(false));
+  };
+  return (
+    <>
+      <section className="section bare">
+        <div className="actions">
+          <button className="linkout" aria-expanded={open} onClick={() => setOpen(!open)}>
+            <div><b>Start over</b><span>measure from what is left now</span></div>
+          </button>
+        </div>
+      </section>
+      {open && (
+        <section className="section">
+          <div className="section-head">
+            <h2 className="section-title">Start over from now</h2>
+            <div className="section-note">top-ups show by themselves</div>
+          </div>
+          <p className="hint">
+            The bar will measure what is spent from now out of the {fmtUsd(c.left ?? 0)} left. A top-up later starts
+            it again by itself.
+          </p>
+          <div className="actions">
+            <button className="linkout" disabled={busy} onClick={() => set(true)}><b>Start over now</b></button>
+            {c.started && c.topped_up?.from === "start" && (
+              <button className="linkout" disabled={busy} onClick={() => set(false)}><b>Undo</b></button>
+            )}
+          </div>
+          {note && <p className="hint" style={{ marginTop: 10 }}>{note}</p>}
+        </section>
+      )}
     </>
   );
 }

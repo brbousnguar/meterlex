@@ -13,6 +13,9 @@ can miss what was spent before it was read (#89). The usage API has hours: the
 hub asks the collector for the hours of the day the balance was read, and counts
 that day's spend after the reading as the share of its usage that came after it.
 
+OpenRouter's meter measures from its last top-up, a rise in what was bought
+between two readings, or from the reading he chose to start over from (#93).
+
 Amounts are micro-dollars in the tables and dollars out. The rate is the last
 seven days: OpenRouter's from its own readings, OpenAI's from its full days.
 """
@@ -38,6 +41,7 @@ OPENAI_BALANCE, OPENAI_BALANCE_AT, OPENAI_BALANCE_DAY_SPENT, OPENAI_TOPUP_DAY = 
 # the share of that day's usage after the reading (#89), and whether the whole day was in when it was taken
 OPENAI_AFTER_SHARE, OPENAI_SHARE_FINAL = "openai_balance_after_share", "openai_balance_share_final"
 OPENAI_ADDED = "openai_balance_added"      # credits added since the reading, as JSON [{usd, at}] (#91)
+OPENROUTER_START = "openrouter_start_at"   # the reading the OpenRouter meter starts over from (#93)
 HOUR = timedelta(hours=1)
 SETTLED_AFTER = timedelta(hours=2)    # the usage API's hours are in this long after the day ends
 
@@ -144,6 +148,36 @@ def take_hours(session: Session, hours: list, read: datetime) -> None:
                     OPENAI_SHARE_FINAL: "1" if read >= start + DAY + SETTLED_AFTER else ""})
 
 
+def start_over(session: Session, on: bool) -> bool:
+    """Measure the OpenRouter meter from its latest reading (#93); off goes back to the last top-up.
+    False with no reading to start from."""
+    latest = _latest(session, "openrouter", with_used=True)
+    if on and latest is None:
+        return False
+    _save(session, {OPENROUTER_START: latest.ts.isoformat() if on else ""})
+    return True
+
+
+def _openrouter_base(session: Session, latest: BalanceReading) -> Optional[dict]:
+    """Where the OpenRouter meter measures from: the later of the last top-up and the reading he
+    started over from, as {at, held, used, from}, or None (the meter is then of all that was bought)."""
+    q = select(BalanceReading).where(BalanceReading.provider == "openrouter",
+                                     BalanceReading.bought.is_not(None), BalanceReading.used.is_not(None))
+    base = None
+    first = session.exec(q.where(BalanceReading.bought == latest.bought).order_by(BalanceReading.ts)).first()
+    before = first and session.exec(q.where(BalanceReading.ts < first.ts).order_by(BalanceReading.ts.desc())).first()
+    if before is not None and first.bought > before.bought:
+        # what was left at the reading before, plus what was bought; the spend between the two counts as after
+        base = {"at": first.ts, "held": first.bought - before.used, "used": before.used, "from": "top-up"}
+    start = _setting(session, OPENROUTER_START)
+    if start:
+        r = session.exec(q.where(BalanceReading.ts <= datetime.fromisoformat(start))
+                         .order_by(BalanceReading.ts.desc())).first()
+        if r is not None and (base is None or r.ts >= base["at"]):
+            base = {"at": r.ts, "held": r.bought - r.used, "used": r.used, "from": "start"}
+    return base
+
+
 def _rate_openrouter(session: Session, latest: BalanceReading, now: datetime) -> Optional[int]:
     """Micro-dollars a day over the last seven days of readings."""
     since = now - RATE_DAYS * DAY
@@ -182,9 +216,16 @@ def view(session: Session, now: datetime, tz: ZoneInfo, provider: str) -> dict:
         latest = _latest(session, provider, with_used=True) or latest
         bought, used = latest.bought, latest.used
         left = None if bought is None or used is None else bought - used
-        out.update({"bought": _usd(bought), "used": _usd(used)})
+        out.update({"bought": _usd(bought), "used": _usd(used), "topped_up": None})
+        started = _setting(session, OPENROUTER_START)
+        out["started"] = _iso(datetime.fromisoformat(started)) if started else None
         if used is not None:
             rate = _rate_openrouter(session, latest, now)
+        base = _openrouter_base(session, latest) if left is not None else None
+        if base is not None:
+            day = base["at"].replace(tzinfo=timezone.utc).astimezone(tz).date()
+            out["topped_up"] = {"day": day.isoformat(), "held": _usd(base["held"]),
+                                "spent": _usd(used - base["used"]), "from": base["from"]}
     else:
         a = anchor(session)
         left = None
