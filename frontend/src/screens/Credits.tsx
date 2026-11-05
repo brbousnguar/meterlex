@@ -284,11 +284,14 @@ function Balance({ c, onSaved }: { c: PrepaidData; onSaved: (c: PrepaidData) => 
           {c.runs_out_at && left !== null && left > 0 && (
             <span className="rank-sub">at {fmtUsd(c.per_day ?? 0)} a day, used up around {dayDate(c.runs_out_at)}</span>
           )}
+          {(c.balance_set?.added ?? []).map((x) => (
+            <span key={x.at} className="rank-sub">{fmtUsd(x.usd)} added {dayDate(x.at)}</span>
+          ))}
           <span className="rank-sub">read on <span className="mono">{r.machine}</span></span>
         </div>
       </section>
 
-      {c.provider === "openai" && !c.balance_set && <BalanceForm c={c} onSaved={onSaved} />}
+      {c.provider === "openai" && (c.balance_set ? <OpenAIActions c={c} onSaved={onSaved} /> : <BalanceForm c={c} onSaved={onSaved} />)}
 
       <section className="section bare">
         <div className="rail lift">
@@ -323,8 +326,6 @@ function Balance({ c, onSaved }: { c: PrepaidData; onSaved: (c: PrepaidData) => 
         <Bars points={points} unit="money" legend={false} format={{ value: fmtUsd, tick: fmtUsdShort }} />
       </section>
 
-      {c.provider === "openai" && c.balance_set && <BalanceForm c={c} onSaved={onSaved} />}
-
       <p className="rank-sub quota-note">
         {c.provider === "openrouter"
           ? <>The figures are OpenRouter's own: the collector on the machine that holds an API key asks for what
@@ -333,14 +334,75 @@ function Balance({ c, onSaved }: { c: PrepaidData; onSaved: (c: PrepaidData) => 
               that machine.</>
           : <>OpenAI has no API for the balance. The spend by day comes from its costs API, read with an admin key
               by the collector on the machine that holds it, at most every 15 minutes; it can lag a few hours.
-              What is left is the balance you typed from the billing page, less what was spent since.</>}
+              What is left is the balance you typed from the billing page, plus the credits added since, less
+              what was spent since. No API tells Meterlex about a purchase: add it here.</>}
       </p>
     </>
   );
 }
 
-/** OpenAI's balance, typed from its billing page: there is no API for it. */
-function BalanceForm({ c, onSaved }: { c: PrepaidData; onSaved: (c: PrepaidData) => void }) {
+/** What to do after a purchase: add the credits bought, or start over from the billing page's balance (#91). */
+function OpenAIActions({ c, onSaved }: { c: PrepaidData; onSaved: (c: PrepaidData) => void }) {
+  const [open, setOpen] = useState<"add" | "again" | null>(null);
+  const toggle = (which: "add" | "again") => setOpen(open === which ? null : which);
+  return (
+    <>
+      <section className="section bare">
+        <div className="actions">
+          <button className="linkout" aria-expanded={open === "add"} onClick={() => toggle("add")}>
+            <div><b>Add credits</b><span>just bought on the billing page</span></div>
+          </button>
+          <button className="linkout" aria-expanded={open === "again"} onClick={() => toggle("again")}>
+            <div><b>Start over</b><span>from the balance the billing page shows</span></div>
+          </button>
+        </div>
+      </section>
+      {open === "add" && <AddCredits onSaved={onSaved} />}
+      {open === "again" && <BalanceForm c={c} onSaved={onSaved} again />}
+    </>
+  );
+}
+
+/** Credits bought, before tax, added to the balance as they are: no API tells Meterlex about a purchase. */
+function AddCredits({ onSaved }: { onSaved: (c: PrepaidData) => void }) {
+  const [value, setValue] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  const usd = parseFloat(value);
+  const add = () => {
+    setBusy(true);
+    api.addOpenAICredits(usd)
+      .then((d) => {
+        onSaved(d);
+        setValue("");
+        setNote(`Added ${fmtUsd(usd)}. Today is the top-up day, and the bar starts again from it.`);
+      })
+      .catch((e) => setNote(`Not added (${String(e.message ?? e)}).`))
+      .finally(() => setBusy(false));
+  };
+  return (
+    <section className="section" data-draft={value ? "" : undefined}>
+      <div className="section-head">
+        <h2 className="section-title">Add credits bought</h2>
+        <div className="section-note">Billing → Buy credits</div>
+      </div>
+      <div className="field">
+        <label htmlFor="openai-add">
+          Credits bought, in dollars <span className="hint">· before tax: a $24.00 invoice with 20% VAT is $20 of credits</span>
+        </label>
+        <input id="openai-add" type="number" inputMode="decimal" step="0.01" min="0" value={value}
+               onChange={(e) => setValue(e.target.value)} />
+      </div>
+      <div className="actions">
+        <button className="linkout" disabled={busy || !(usd > 0)} onClick={add}><b>Add</b></button>
+      </div>
+      {note && <p className="hint" style={{ marginTop: 10 }}>{note}</p>}
+    </section>
+  );
+}
+
+/** OpenAI's balance, typed from its billing page: there is no API for it. `again` starts over from it. */
+function BalanceForm({ c, onSaved, again = false }: { c: PrepaidData; onSaved: (c: PrepaidData) => void; again?: boolean }) {
   const [value, setValue] = useState(c.balance_set ? c.balance_set.usd.toFixed(2) : "");
   const [topup, setTopup] = useState(c.balance_set?.topped_up ?? "");
   // What the form last held saved: anything else is a draft a pull to refresh must not drop.
@@ -354,7 +416,7 @@ function BalanceForm({ c, onSaved }: { c: PrepaidData; onSaved: (c: PrepaidData)
     api.setOpenAIBalance(usd, usd === null ? null : topup || null)
       .then((d) => {
         onSaved(d);
-        setNote(usd === null ? "Cleared." : "Saved. What was spent from now on comes off it.");
+        setNote(usd === null ? "Cleared." : "Saved. Meterlex counts from here: what is spent from now on comes off it.");
         if (usd === null) { setValue(""); setTopup(""); setSaved({ value: "", topup: "" }); }
         else setSaved({ value, topup });
       })
@@ -365,12 +427,14 @@ function BalanceForm({ c, onSaved }: { c: PrepaidData; onSaved: (c: PrepaidData)
   return (
     <section className="section" data-draft={draft ? "" : undefined}>
       <div className="section-head">
-        <h2 className="section-title">Balance on the billing page</h2>
+        <h2 className="section-title">{again ? "Start over from the billing page" : "Balance on the billing page"}</h2>
         <div className="section-note">platform.openai.com → Settings → Billing</div>
       </div>
       <div className="field">
         <label htmlFor="openai-balance">
-          Credit balance now, in dollars <span className="hint">· type it again after a top-up</span>
+          Credit balance now, in dollars <span className="hint">· {again
+            ? "the starting point from now on; credits added before it are in it"
+            : "after a top-up, add the credits instead"}</span>
         </label>
         <input id="openai-balance" type="number" inputMode="decimal" step="0.01" min="0" value={value}
                onChange={(e) => setValue(e.target.value)} />

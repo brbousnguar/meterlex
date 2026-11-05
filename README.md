@@ -325,10 +325,14 @@ OpenAI) shows one at a time.
   gives the spend by UTC day, and only to an **admin key** (platform.openai.com →
   Settings → Organization → Admin keys; a project key answers 403). Type the
   balance from the billing page on the OpenAI view: what was spent from then on
-  comes off it. Type it again after a top-up. The costs can lag a few hours,
+  comes off it. After a top-up, **Add credits** with the credits bought (before
+  tax), which counts them from that moment and makes today the top-up day;
+  **Start over** types the billing page's balance again. No API reports a
+  purchase, so it never arrives by itself. The costs can lag a few hours,
   so for the day the balance was typed the hub asks the collector for that
   day's usage by the hour (`/v1/organization/usage/completions`, same admin
-  key) and counts only the share of the day's spend that came after it. With it, give the day of the last top-up (Billing history): the bar then
+  key) and counts only the share of the day's spend that came after it. With
+  the balance, give the day of the last top-up (Billing history): the bar then
   measures what was spent since that top-up out of what the account held after it.
 
 On the Credits tab, a meter that is 90% or more used turns red.

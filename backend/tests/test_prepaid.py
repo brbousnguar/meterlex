@@ -80,7 +80,7 @@ def test_openai_left_is_the_saved_balance_less_what_was_spent_since(session):
     days.update({"2026-10-20": 1.25, "2026-10-21": 2.0})
     ingest.ingest_balances(session, m, [_oa(T0 + timedelta(days=1), days)])
     v = prepaid.view(session, T0 + timedelta(days=1), PARIS, "openai")
-    assert v["balance_set"] == {"usd": 20.0, "at": "2026-10-20T09:00:00Z", "topped_up": None}
+    assert v["balance_set"] == {"usd": 20.0, "at": "2026-10-20T09:00:00Z", "topped_up": None, "added": []}
     assert v["spent_since_balance"] == 2.75 and v["left"] == 17.25
     assert session.get(CreditDay, ("openai", "2026-10-20")).used == 1_250_000      # a later read of a day wins
 
@@ -158,6 +158,39 @@ def test_bad_usage_hours_are_rejected(session):
            {**good, "hours": [{"start": "nine", "weight": 1}]},
            {**good, "hours": [{"start": "2026-10-20T09:00:00Z", "weight": -1}]}]
     assert ingest.ingest_balances(session, m, bad)["rejected"] == 5
+
+
+def test_credits_bought_are_added_to_the_balance_and_start_the_bar(session):
+    m = _machine(session)
+    assert prepaid.add_credits(session, 20.0, T0) is False                    # nothing to add to yet
+    days = {"2026-10-19": 1.0, "2026-10-20": 0.0}
+    ingest.ingest_balances(session, m, [_oa(T0, days)])
+    prepaid.save_anchor(session, 5.0, T0, date(2026, 10, 1))
+    later = T0 + timedelta(days=2)                                          # the 22nd, $1 on the 21st
+    days.update({"2026-10-21": 1.0, "2026-10-22": 0.5})
+    ingest.ingest_balances(session, m, [_oa(later, days)])
+    assert prepaid.view(session, later, PARIS, "openai")["left"] == 3.5
+    assert prepaid.add_credits(session, 20.0, later) is True
+    v = prepaid.view(session, later, PARIS, "openai")
+    assert v["left"] == 23.5 and v["spent_since_balance"] == 1.5
+    assert v["balance_set"]["added"] == [{"usd": 20.0, "at": "2026-10-22T09:00:00Z"}]
+    assert v["balance_set"]["topped_up"] == "2026-10-22"
+    # the top-up day counts whole: the 22nd's $0.50 went on the old money, so held reads $0.50 high
+    assert v["topped_up"] == {"day": "2026-10-22", "held": 24.0, "spent": 0.5}
+    prepaid.add_credits(session, 5.0, later + timedelta(hours=1))
+    assert prepaid.view(session, later, PARIS, "openai")["left"] == 28.5
+    prepaid.save_anchor(session, 30.0, later + timedelta(hours=2))          # starting over drops what was added
+    v = prepaid.view(session, later + timedelta(hours=2), PARIS, "openai")
+    assert v["balance_set"]["added"] == [] and v["left"] == 30.0
+
+
+def test_the_api_adds_credits_bought(client):
+    assert client.post("/api/credits/openai/credits", json={"usd": 20}).status_code == 409
+    client.put("/api/credits/openai/balance", json={"usd": 2.5})
+    r = client.post("/api/credits/openai/credits", json={"usd": "20"})
+    assert r.status_code == 200 and r.json()["balance_set"]["added"][0]["usd"] == 20.0
+    for bad in ({"usd": 0}, {"usd": -5}, {"usd": "lots"}, {}, {"usd": 200_000}):
+        assert client.post("/api/credits/openai/credits", json=bad).status_code == 400
 
 
 def test_the_api_takes_both_providers_and_the_openai_balance(client):

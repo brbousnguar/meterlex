@@ -24,8 +24,12 @@ async function patch<T>(path: string, body: unknown): Promise<T> {
   if (!r.ok) throw new Error(`${r.status} ${path}`);
   return r.json();
 }
-async function post<T>(path: string): Promise<T> {
-  const r = await fetch(`${BASE}${path}`, { method: "POST" });
+async function post<T>(path: string, body?: unknown): Promise<T> {
+  const r = await fetch(`${BASE}${path}`, body === undefined ? { method: "POST" } : {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
   if (!r.ok) throw new Error(`${r.status} ${path}`);
   return r.json();
 }
@@ -347,8 +351,8 @@ export type Prepaid = {
   provider: "openrouter" | "openai";
   label: string;
   reading: { at: string; machine: string; stale: boolean } | null;
-  /** `topped_up` is the day of the last top-up, typed with the balance (#79) */
-  balance_set?: { usd: number; at: string; topped_up: string | null } | null;
+  /** `topped_up` is the day of the last top-up, typed with the balance (#79) or the day credits were added (#91) */
+  balance_set?: { usd: number; at: string; topped_up: string | null; added: { usd: number; at: string }[] } | null;
   /** OpenAI: what the account held after the last top-up (what is left plus all spent since), the meter's whole */
   topped_up?: { day: string; held: number; spent: number } | null;
   bought?: number | null;
@@ -369,6 +373,8 @@ export const api = {
   /** the balance read on the OpenAI billing page now; null clears it */
   setOpenAIBalance: (usd: number | null, toppedUp: string | null = null) =>
     put<Prepaid>("/api/credits/openai/balance", { usd, topped_up: toppedUp }),
+  /** credits just bought on the OpenAI billing page, before tax: added to the balance, today the top-up day (#91) */
+  addOpenAICredits: (usd: number) => post<Prepaid>("/api/credits/openai/credits", { usd }),
   quota: (back = 0) => get<Quota>(`/api/quota${back ? `?back=${back}` : ""}`),
   credits: (provider = "elevenlabs") => get<Credits>(`/api/credits?provider=${encodeURIComponent(provider)}`),
   health: () => get<Health>("/api/health"),

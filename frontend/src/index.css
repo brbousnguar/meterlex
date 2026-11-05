@@ -443,6 +443,7 @@ button.section-note { min-height: 30px; padding: 4px 2px 4px 10px; font-weight: 
 a.linkout::after { content: "↗"; margin-left: auto; color: var(--accent-ink); font-weight: 600; }
 .linkout:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--ink); }
 .linkout:disabled { opacity: .35; cursor: default; }
+.linkout[aria-expanded="true"] { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--ink); background: var(--surface-2); }
 .actions { display: flex; gap: 12px; margin-top: 16px; flex-wrap: wrap; }
 .actions .linkout { flex: 1; min-width: 150px; justify-content: center; }
 
