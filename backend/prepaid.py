@@ -5,7 +5,8 @@ OpenAI says neither: its costs API gives the spend by UTC day (with an admin
 key), and the balance is the one Brahim read on the billing page, saved here
 with the day's spend at that moment, less what was spent since. With the day
 of the last top-up beside it (#79), the meter measures what was spent since that
-top-up out of what the account held after it.
+top-up out of what the account held after it. Credits bought later can be added
+to it as they are (#91): they count from the moment they were added.
 
 The costs API runs a few hours behind, so the day's spend kept with the balance
 can miss what was spent before it was read (#89). The usage API has hours: the
@@ -15,6 +16,7 @@ that day's spend after the reading as the share of its usage that came after it.
 Amounts are micro-dollars in the tables and dollars out. The rate is the last
 seven days: OpenRouter's from its own readings, OpenAI's from its full days.
 """
+import json
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo
@@ -35,6 +37,7 @@ OPENAI_BALANCE, OPENAI_BALANCE_AT, OPENAI_BALANCE_DAY_SPENT, OPENAI_TOPUP_DAY = 
     "openai_balance_usd", "openai_balance_at", "openai_balance_day_spent", "openai_topup_day")
 # the share of that day's usage after the reading (#89), and whether the whole day was in when it was taken
 OPENAI_AFTER_SHARE, OPENAI_SHARE_FINAL = "openai_balance_after_share", "openai_balance_share_final"
+OPENAI_ADDED = "openai_balance_added"      # credits added since the reading, as JSON [{usd, at}] (#91)
 HOUR = timedelta(hours=1)
 SETTLED_AFTER = timedelta(hours=2)    # the usage API's hours are in this long after the day ends
 
@@ -70,7 +73,7 @@ def _setting(session: Session, key: str) -> str:
 
 
 def anchor(session: Session) -> Optional[dict]:
-    """The OpenAI balance as last saved: {usd, at, day_spent, topped_up, after_share, share_final} or None."""
+    """The OpenAI balance as last saved: {usd, at, day_spent, topped_up, after_share, share_final, added} or None."""
     usd, at = _setting(session, OPENAI_BALANCE), _setting(session, OPENAI_BALANCE_AT)
     if not usd or not at:
         return None
@@ -80,8 +83,10 @@ def anchor(session: Session) -> Optional[dict]:
                 "day_spent": int(_setting(session, OPENAI_BALANCE_DAY_SPENT) or 0),
                 "topped_up": date.fromisoformat(topup) if topup else None,
                 "after_share": float(share) if share else None,
-                "share_final": _setting(session, OPENAI_SHARE_FINAL) == "1"}
-    except ValueError:
+                "share_final": _setting(session, OPENAI_SHARE_FINAL) == "1",
+                "added": [{"usd": float(x["usd"]), "at": datetime.fromisoformat(x["at"])}
+                          for x in json.loads(_setting(session, OPENAI_ADDED) or "[]")]}
+    except (ValueError, KeyError, TypeError):
         return None
 
 
@@ -94,7 +99,18 @@ def save_anchor(session: Session, usd: Optional[float], now: datetime, topped_up
               if usd is None else
               {OPENAI_BALANCE: f"{usd:.2f}", OPENAI_BALANCE_AT: now.isoformat(timespec="seconds"),
                OPENAI_BALANCE_DAY_SPENT: str(spent), OPENAI_TOPUP_DAY: topped_up.isoformat() if topped_up else ""})
-    _save(session, {**values, OPENAI_AFTER_SHARE: "", OPENAI_SHARE_FINAL: ""})   # a new reading, a new share
+    _save(session, {**values, OPENAI_AFTER_SHARE: "", OPENAI_SHARE_FINAL: "", OPENAI_ADDED: ""})   # a new reading, a new start
+
+
+def add_credits(session: Session, usd: float, now: datetime) -> bool:
+    """Add credits bought now to the saved balance, today the top-up day (#91); False with no balance to add to."""
+    a = anchor(session)
+    if a is None:
+        return False
+    added = [{"usd": x["usd"], "at": x["at"].isoformat(timespec="seconds")} for x in a["added"]]
+    added.append({"usd": round(usd, 2), "at": now.isoformat(timespec="seconds")})
+    _save(session, {OPENAI_ADDED: json.dumps(added), OPENAI_TOPUP_DAY: now.date().isoformat()})
+    return True
 
 
 def _save(session: Session, values: dict) -> None:
@@ -147,7 +163,8 @@ def view(session: Session, now: datetime, tz: ZoneInfo, provider: str) -> dict:
     if provider == "openai":
         a = anchor(session)
         out["balance_set"] = None if a is None else {"usd": a["usd"], "at": _iso(a["at"]),
-                                                     "topped_up": a["topped_up"] and a["topped_up"].isoformat()}
+                                                     "topped_up": a["topped_up"] and a["topped_up"].isoformat(),
+                                                     "added": [{"usd": x["usd"], "at": _iso(x["at"])} for x in a["added"]]}
         out["topped_up"] = None
     if latest is None:
         return out
@@ -179,7 +196,8 @@ def view(session: Session, now: datetime, tz: ZoneInfo, provider: str) -> dict:
             on_day = (round(day_total * a["after_share"]) if a["after_share"] is not None
                       else max(0, day_total - a["day_spent"]))
             out["spent_since_balance"] = _usd(after + on_day)
-            left = round(a["usd"] * MICRO) - after - on_day
+            added = sum(round(x["usd"] * MICRO) for x in a["added"])
+            left = round(a["usd"] * MICRO) + added - after - on_day
             # what the account held after the top-up: what is left plus all spent from that day on. The
             # top-up day counts whole, so a day that began on the old money reads a little high; on the
             # day the balance was typed, as after a top-up today, only what was spent after it counts.

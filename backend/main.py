@@ -874,6 +874,21 @@ def put_openai_balance(payload: dict, session: Session = Depends(get_session)):
     return prepaid.view(session, datetime.utcnow(), LOCAL_TZ, "openai")
 
 
+@app.post("/api/credits/openai/credits")
+def add_openai_credits(payload: dict, session: Session = Depends(get_session)):
+    """Credits just bought on the OpenAI billing page, in dollars before tax ({"usd": 20}): they are
+    added to the saved balance and today becomes the top-up day (#91). 409 with no balance to add to."""
+    try:
+        usd = float(payload.get("usd"))
+    except (TypeError, ValueError):
+        raise HTTPException(400, "usd must be a number of dollars")
+    if not 0 < usd <= 100_000:
+        raise HTTPException(400, "usd must be more than 0 and at most 100,000")
+    if not prepaid.add_credits(session, usd, datetime.utcnow()):
+        raise HTTPException(409, "no balance to add to: type the one on the billing page first")
+    return prepaid.view(session, datetime.utcnow(), LOCAL_TZ, "openai")
+
+
 # ── prices ────────────────────────────────────────────────────────────────────
 
 @app.get("/api/quota")
