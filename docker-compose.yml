@@ -9,9 +9,9 @@ services:
       # The machine the hub's own history came from, before collectors
       # reported per machine: its collector's machine name (see .env.example).
       HUB_MACHINE: ${HUB_MACHINE:-hub}
-      # model-prices runs on the host (docker-compose project of its own),
+      # Ratelex runs on the host (docker-compose project of its own),
       # not on this container's network — reach it via the host gateway.
-      MODEL_PRICES_URL: http://host.docker.internal:8693
+      RATELEX_URL: http://host.docker.internal:8693
       # Where the rate card's own app is reachable from a browser (its tailnet
       # address, so a phone can follow the link too). Set it in .env.
       PRICES_URL: ${PRICES_URL:-}
