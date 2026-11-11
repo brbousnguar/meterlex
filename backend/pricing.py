@@ -1,6 +1,6 @@
 """Price resolution for Meterlex.
 
-The rate card itself lives in the model-prices service (webapps/model-prices)
+The rate card itself lives in Ratelex (webapps/ratelex)
 and is mirrored into the local model_prices table — see mirror_pull_prices()
 below. This module keeps the resolve/fallback logic, which is Meterlex-specific
 (e.g. Ollama routing, the copilot-auto stand-in, dated-variant fallbacks) and
@@ -18,7 +18,7 @@ from models import ModelPrice, PricePoint, Setting
 
 log = logging.getLogger("meterlex.pricing")
 
-MODEL_PRICES_URL = os.getenv("MODEL_PRICES_URL", "http://host.docker.internal:8693")
+RATELEX_URL = os.getenv("RATELEX_URL", "http://host.docker.internal:8693")
 
 FREE_MODEL_PREFIXES = ("<synthetic>", "local/")
 
@@ -37,21 +37,21 @@ def _card(rows: list, points: list) -> set:
 
 
 async def mirror_pull_prices(session: Session) -> dict:
-    """Pull the shared rate card from the central model-prices service and
+    """Pull the shared rate card from Ratelex and
     replace the local mirror with it. Never raises — on failure, logs and
     keeps whatever is already in the local table (an outage here must not
     zero out every turn's cost)."""
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(f"{MODEL_PRICES_URL}/api/prices")
+            resp = await client.get(f"{RATELEX_URL}/api/prices")
             resp.raise_for_status()
             rows = resp.json()
     except Exception as exc:
-        log.warning("model-prices mirror pull failed: %s", exc)
+        log.warning("Ratelex mirror pull failed: %s", exc)
         return {"synced": False, "error": str(exc), "count": 0}
 
     if not rows:
-        log.warning("model-prices returned 0 rows — keeping existing mirror")
+        log.warning("Ratelex returned 0 rows — keeping existing mirror")
         return {"synced": False, "error": "empty response", "count": 0}
 
     from sqlmodel import select
@@ -97,7 +97,7 @@ async def mirror_pull_prices(session: Session) -> dict:
 
 
 def ollama_cloud_id(model_id: str) -> str:
-    """model-prices keys Ollama Cloud rows as `ollama/<model>:cloud`."""
+    """Ratelex keys Ollama Cloud rows as `ollama/<model>:cloud`."""
     m = model_id.split("/", 1)[1] if model_id.startswith("ollama/") else model_id
     for suffix in (":cloud", "-cloud"):
         if m.endswith(suffix):

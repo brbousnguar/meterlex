@@ -118,7 +118,7 @@ def test_an_ollama_hosted_model_is_priced_by_its_host_whatever_ran_it(session):
 
 
 def _sol_payload():
-    """GPT-5.6 Sol as model-prices sends it: launched at $5 / $30, cut to $4 / $20 on 21 Aug."""
+    """GPT-5.6 Sol as Ratelex sends it: launched at $5 / $30, cut to $4 / $20 on 21 Aug."""
     return [{
         "model_id": "gpt-5.6-sol", "prompt": 4e-6, "completion": 20e-6, "cache_read": 0.4e-6,
         "reasoning": 20e-6, "source": "openrouter",

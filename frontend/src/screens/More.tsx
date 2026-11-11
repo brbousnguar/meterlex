@@ -62,7 +62,7 @@ export default function More({ onReload }: { onReload: () => void }) {
           <a className="linkout" href={cfg.prices_url} target="_blank" rel="noopener noreferrer">
             <div>
               <b>Rate card</b>
-              <span>Prices per model live in the model-prices app. Meterlex mirrors them; it never keeps its own.</span>
+              <span>Prices per model live in Ratelex. Meterlex mirrors them; it never keeps its own.</span>
             </div>
           </a>
         ) : (

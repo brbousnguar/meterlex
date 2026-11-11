@@ -74,7 +74,7 @@ class ModelPrice(SQLModel, table=True):
 
 
 class PricePoint(SQLModel, table=True):
-    """A dated rate from model-prices' price history, mirrored with the card.
+    """A dated rate from Ratelex's price history, mirrored with the card.
 
     A turn is priced at the point in force on its day; the newest point means
     "today's rate", so the ModelPrice row wins there."""

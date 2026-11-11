@@ -39,7 +39,7 @@ host; transcripts never leave the machine that wrote them.
 - **Codex** — per-turn token deltas from `~/.codex/sessions/**/*.jsonl` via `token_count` events (a repeated event with an unchanged running total is skipped); OpenAI Codex endpoint billed against ChatGPT Pro quota
 - **Antigravity** — per-conversation SQLite DBs at `~/.gemini/antigravity-cli/conversations/*.db`; token counts extracted from protobuf step payloads, model IDs from `gen_metadata` blobs
 - **Gemini CLI** — each message from `~/.gemini/tmp/<project>/chats/*.jsonl`, once: the CLI appends a message again every time it updates it. Cached input is its own count and thoughts are billed as output.
-- **Ollama** — non-Claude models run through Claude Code (`ollama launch claude`: GLM, Kimi, DeepSeek, MiniMax…). Ollama Cloud models are priced at Ollama's own per-token rates from model-prices; models that ran locally are €0.
+- **Ollama** — non-Claude models run through Claude Code (`ollama launch claude`: GLM, Kimi, DeepSeek, MiniMax…). Ollama Cloud models are priced at Ollama's own per-token rates from Ratelex; models that ran locally are €0.
 - **Copilot CLI** — per-session, per-model token totals from `~/.copilot/session-state/*/events.jsonl` (older CLIs: `~/.copilot/data.db`), priced at each model's rate. In-editor Copilot usage is not exposed locally and is not counted. Variable subscription charges can be entered as monthly bills in Prices & settings.
 - **OpenClaw agents** — every `model.completed` event in each agent's own database (`~/.openclaw/agents/<id>/agent/openclaw-agent.sqlite`), read incrementally by the event's timestamp. The **agent is the project** (`nova`, `rex`, `forge`), the session key says whether a person, a schedule or another agent started the run, and a model someone else hosts is named by its host (`ollama/…`, `openrouter/…`) so the rate card prices it correctly. OpenClaw carries **no subscription of its own**: its agents run on the plans already counted above, mostly Claude Max.
 - **Hermes Agent** — each session's usage per model, from Hermes's own database (`~/.hermes/state.db`, and each profile's under `~/.hermes/profiles/`). Side work Hermes does with another model (titles, compression, vision) is kept apart from the agent's own loop, and usage that only the session row holds (a gateway writes running totals there) goes to the session's model. A run traced by [NeMo Relay](https://github.com/NVIDIA/nemoclaw-community) also leaves an ATIF trajectory, and the tutorial runs delete their Hermes home on exit, so the collector reads those too, from the folder given with `setup --path hermes_relay=DIR`. Both name a session by Hermes's own id and use the same key, so a session found in both is stored once. A model someone else hosts is named by its host, as for OpenClaw; NVIDIA's free endpoint has no rate and costs nothing. Hermes pays per call, so it has **no subscription**.
@@ -115,7 +115,7 @@ Docker Compose automatically reads `.env` from the repository root.
 | --- | --- |
 | `HUB_MACHINE` | The machine name for history stored before collectors reported per machine: use the name the hub machine's own collector reports under |
 | `LOCAL_TZ` | The zone periods are counted in (default `Europe/Paris`). A week starts Monday 00:00 there and a day at local midnight; rows stay stored in UTC |
-| `PRICES_URL` | Where the model-prices app is reachable from a browser. The Prices link on the More screen points there; leave empty to hide it |
+| `PRICES_URL` | Where Ratelex is reachable from a browser. The Prices link on the More screen points there; leave empty to hide it |
 | `OPENCLAW_SPEND_URL` | Where [Clawlex](https://github.com/brbousnguar/clawlex) is reachable, for per-agent and per-run detail. The More screen links there; leave empty to hide it |
 
 The hub reads no session logs itself: every machine, the hub's own included,
@@ -433,7 +433,7 @@ Contributions are covered by the [MIT License](LICENSE); see
   change without notice.
 - Historical data is limited to what each local tool still retains.
 - Model aliases and bundled/automatic model selection may require approximate
-  pricing; rates are overridden at the model-prices service, not in this UI.
+  pricing; rates are overridden at Ratelex, not in this UI.
 - The application does not authenticate users or encrypt its SQLite database.
 - Figures are estimates for engineering insight, not invoices or accounting
   records.
@@ -465,8 +465,8 @@ paths.
 | `POST` | `/api/projects/rename` | Move the calling machine's rows from a stored label to its repository (`{"renames": {old: new}}`) |
 | `GET` | `/api/spend` | Aggregated spend for a period, by model, project, branch, machine and origin (`?source=`, `?machine=`) |
 | `GET` | `/api/spend/timeseries` | Bucketed series (daily / monthly / yearly) with per-source, per-model and per-machine splits |
-| `GET` | `/api/prices` | All model prices (mirrored from the model-prices service) |
-| `POST` | `/api/prices/mirror-pull` | Pull latest rates from model-prices and recompute all costs |
+| `GET` | `/api/prices` | All model prices (mirrored from Ratelex) |
+| `POST` | `/api/prices/mirror-pull` | Pull latest rates from Ratelex and recompute all costs |
 | `GET/PATCH` | `/api/settings` | FX rate and per-tool subscription amounts |
 | `GET` | `/api/bills/{source}` | Per-month manual bills (used for variable Copilot charges) |
 | `PATCH` | `/api/bills/{source}/{year_month}` | Set or update a monthly bill |
@@ -474,7 +474,7 @@ paths.
 
 ## Pricing policy
 
-The rate card itself lives in [model-prices](https://github.com/brbousnguar/model-prices), a small shared service also used by openclaw-spend, and is mirrored into Meterlex's local `model_prices` table (read-only here — edit rates there, not in this app). A weekly cron pulls the latest rates into both apps every Monday at 05:00 and recomputes historical costs; use **Recompute all costs** to do that on demand. Each turn is priced at the rate in force on its day: the pull also mirrors each model's price history (model-prices' `history` points) into `price_points`, so a turn from before a price cut keeps the launch price and the newest point hands over to today's rate. A model with no announced change has one point and is priced at today's rate throughout. Gemini models without an exact match fall back to the generic flash-tier entry; unrecognised `glm-*` IDs fall back to the GLM-5.2 tier; unrecognised `gpt-5*` IDs fall back to the base GPT-5 tier — this fallback logic itself stays local to Meterlex. Turns Ollama served are priced at Ollama Cloud's own per-token rates (model-prices' `ollama/<model>:cloud` rows) when Ollama sells that model in its cloud; any other model Ollama served ran locally and is €0, like `local/*` and `<synthetic>` events. Copilot CLI models without a rate of their own use the representative `copilot-auto` rate. FX defaults to 0.92 (USD → EUR), editable in settings.
+The rate card itself lives in [Ratelex](https://github.com/brbousnguar/ratelex), a small shared service also used by Clawlex and Orblex, and is mirrored into Meterlex's local `model_prices` table (read-only here — edit rates there, not in this app). A weekly cron pulls the latest rates into both apps every Monday at 05:00 and recomputes historical costs; use **Recompute all costs** to do that on demand. Each turn is priced at the rate in force on its day: the pull also mirrors each model's price history (Ratelex's `history` points) into `price_points`, so a turn from before a price cut keeps the launch price and the newest point hands over to today's rate. A model with no announced change has one point and is priced at today's rate throughout. Gemini models without an exact match fall back to the generic flash-tier entry; unrecognised `glm-*` IDs fall back to the GLM-5.2 tier; unrecognised `gpt-5*` IDs fall back to the base GPT-5 tier — this fallback logic itself stays local to Meterlex. Turns Ollama served are priced at Ollama Cloud's own per-token rates (Ratelex's `ollama/<model>:cloud` rows) when Ollama sells that model in its cloud; any other model Ollama served ran locally and is €0, like `local/*` and `<synthetic>` events. Copilot CLI models without a rate of their own use the representative `copilot-auto` rate. FX defaults to 0.92 (USD → EUR), editable in settings.
 
 ## Visual identity
 
