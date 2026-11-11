@@ -8,13 +8,13 @@ doesn't belong in the shared service.
 """
 import logging
 import os
-from datetime import datetime
+from datetime import date, datetime
 from typing import Optional
 
 import httpx
 from sqlmodel import Session
 
-from models import ModelPrice, Setting
+from models import ModelPrice, PricePoint, Setting
 
 log = logging.getLogger("meterlex.pricing")
 
@@ -28,10 +28,12 @@ def _is_free(model_id: str) -> bool:
                for p in FREE_MODEL_PREFIXES) or model_id in {"synthetic", "<synthetic>"}
 
 
-def _card(rows: list) -> set:
-    """What a rate card says, without the pull's own timestamp."""
-    return {(r.model_id, r.display_name, r.provider, r.prompt, r.completion,
-             r.cache_read, r.cache_write, r.reasoning, r.source) for r in rows}
+def _card(rows: list, points: list) -> set:
+    """What a rate card says, its price history included, without the pull's own timestamp."""
+    return ({(r.model_id, r.display_name, r.provider, r.prompt, r.completion,
+              r.cache_read, r.cache_write, r.reasoning, r.source) for r in rows}
+            | {("point", p.model_id, p.on, p.prompt, p.completion, p.cache_read, p.cache_write)
+               for p in points})
 
 
 async def mirror_pull_prices(session: Session) -> dict:
@@ -53,7 +55,7 @@ async def mirror_pull_prices(session: Session) -> dict:
         return {"synced": False, "error": "empty response", "count": 0}
 
     from sqlmodel import select
-    incoming = []
+    incoming, points = [], []
     for r in rows:
         row = ModelPrice(model_id=r["model_id"])
         row.display_name = r.get("display_name")
@@ -66,13 +68,25 @@ async def mirror_pull_prices(session: Session) -> dict:
         row.source = r.get("source", "seed")
         row.updated_at = datetime.utcnow()
         incoming.append(row)
+        for p in r.get("history") or []:
+            try:
+                on = date.fromisoformat(p["on"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            points.append(PricePoint(
+                model_id=row.model_id, on=on, prompt=p.get("prompt", 0.0), completion=p.get("completion", 0.0),
+                cache_read=p.get("cache_read", 0.0), cache_write=p.get("cache_write", 0.0),
+            ))
 
     existing_rows = session.exec(select(ModelPrice)).all()
-    changed = _card(existing_rows) != _card(incoming)
-    for existing in existing_rows:
+    existing_points = session.exec(select(PricePoint)).all()
+    changed = _card(existing_rows, existing_points) != _card(incoming, points)
+    for existing in [*existing_rows, *existing_points]:
         session.delete(existing)
     session.flush()
     session.add_all(incoming)
+    session.add_all(points)
+    session.info.pop(_POINTS_KEY, None)
     n = len(incoming)
     session.commit()
     row = session.get(Setting, "last_price_mirror_pull") or Setting(key="last_price_mirror_pull", value="")
@@ -120,14 +134,53 @@ def resolve_price(session: Session, model_id: str, source: Optional[str] = None)
     return None
 
 
-def compute_cost(session: Session, provider: str, model_id: str, usage: dict, source: Optional[str] = None):
-    """Returns (cost_usd, source)."""
+_POINTS_KEY = "meterlex_price_points"
+
+
+def _points(session: Session) -> dict:
+    """Every model's dated rates, oldest first, read once per session: a
+    reprice walks thousands of turns through the same one."""
+    cached = session.info.get(_POINTS_KEY)
+    if cached is None:
+        from sqlmodel import select
+        cached = {}
+        for p in session.exec(select(PricePoint).order_by(PricePoint.on)).all():
+            cached.setdefault(p.model_id, []).append(
+                (p.on, p.prompt, p.completion, p.cache_read, p.cache_write))
+        session.info[_POINTS_KEY] = cached
+    return cached
+
+
+def rates_on(session: Session, row: ModelPrice, at: Optional[datetime]):
+    """The row's rates in force on `at`'s day: (prompt, completion, cache_read, cache_write, reasoning).
+
+    The newest point is today's rate, so the row itself applies from that
+    day on (and with no date or no history). A turn older than the first
+    point takes the first, the launch price."""
+    current = (row.prompt, row.completion, row.cache_read, row.cache_write, row.reasoning)
+    pts = _points(session).get(row.model_id) if at else None
+    if not pts:
+        return current
+    day = at.date()
+    i = max((n for n, p in enumerate(pts) if p[0] <= day), default=0)
+    if i == len(pts) - 1:
+        return current
+    on, prompt, completion, cache_read, cache_write = pts[i]
+    # Reasoning tokens bill at the output rate when the card says so; follow it back in time.
+    reasoning = completion if row.reasoning == row.completion else row.reasoning
+    return (prompt, completion, cache_read, cache_write, reasoning)
+
+
+def compute_cost(session: Session, provider: str, model_id: str, usage: dict, source: Optional[str] = None,
+                 at: Optional[datetime] = None):
+    """Returns (cost_usd, source), at the rates in force on `at`'s day when given."""
     if _is_free(model_id):
         return (0.0, "free")
 
     row = resolve_price(session, model_id, source)
     if row is None:
         return (0.0, "free")
+    prompt, completion, cache_read, cache_write, reasoning = rates_on(session, row, at)
 
     in_t = int(usage.get("input", 0) or 0)
     out_t = int(usage.get("output", 0) or 0)
@@ -136,11 +189,11 @@ def compute_cost(session: Session, provider: str, model_id: str, usage: dict, so
     rsn = int(usage.get("reasoningTokens", 0) or 0)
 
     cost = (
-        in_t * row.prompt
-        + out_t * row.completion
-        + ca_r * row.cache_read
-        + ca_w * row.cache_write
-        + rsn * row.reasoning
+        in_t * prompt
+        + out_t * completion
+        + ca_r * cache_read
+        + ca_w * cache_write
+        + rsn * reasoning
     )
     return (round(cost, 8), row.source)
 

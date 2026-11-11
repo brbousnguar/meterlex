@@ -365,7 +365,8 @@ backend/
   credits.py        ElevenLabs credits: the month, pace and projection from the collector's readings
   prepaid.py        OpenRouter and OpenAI balances: what is left, the spend by day, how long it lasts
   manage.py         Admin commands: machine keys, legacy dedupe, quota plan
-  pricing.py        Price resolution: mirrored rate card → Meterlex's fallbacks → free
+  pricing.py        Price resolution: mirrored rate card → Meterlex's fallbacks → free,
+                    at the rate in force on the turn's day
   models.py         SQLModel schema (UsageTurn, Machine, ModelPrice, Setting, ManualBill, CreditReading, CreditDay, BalanceReading)
   database.py       Engine, session helpers, column migrations
 frontend/
@@ -473,7 +474,7 @@ paths.
 
 ## Pricing policy
 
-The rate card itself lives in [model-prices](https://github.com/brbousnguar/model-prices), a small shared service also used by openclaw-spend, and is mirrored into Meterlex's local `model_prices` table (read-only here — edit rates there, not in this app). A weekly cron pulls the latest rates into both apps every Monday at 05:00 and recomputes historical costs; use **Recompute all costs** to do that on demand. Gemini models without an exact match fall back to the generic flash-tier entry; unrecognised `glm-*` IDs fall back to the GLM-5.2 tier; unrecognised `gpt-5*` IDs fall back to the base GPT-5 tier — this fallback logic itself stays local to Meterlex. Turns Ollama served are priced at Ollama Cloud's own per-token rates (model-prices' `ollama/<model>:cloud` rows) when Ollama sells that model in its cloud; any other model Ollama served ran locally and is €0, like `local/*` and `<synthetic>` events. Copilot CLI models without a rate of their own use the representative `copilot-auto` rate. FX defaults to 0.92 (USD → EUR), editable in settings.
+The rate card itself lives in [model-prices](https://github.com/brbousnguar/model-prices), a small shared service also used by openclaw-spend, and is mirrored into Meterlex's local `model_prices` table (read-only here — edit rates there, not in this app). A weekly cron pulls the latest rates into both apps every Monday at 05:00 and recomputes historical costs; use **Recompute all costs** to do that on demand. Each turn is priced at the rate in force on its day: the pull also mirrors each model's price history (model-prices' `history` points) into `price_points`, so a turn from before a price cut keeps the launch price and the newest point hands over to today's rate. A model with no announced change has one point and is priced at today's rate throughout. Gemini models without an exact match fall back to the generic flash-tier entry; unrecognised `glm-*` IDs fall back to the GLM-5.2 tier; unrecognised `gpt-5*` IDs fall back to the base GPT-5 tier — this fallback logic itself stays local to Meterlex. Turns Ollama served are priced at Ollama Cloud's own per-token rates (model-prices' `ollama/<model>:cloud` rows) when Ollama sells that model in its cloud; any other model Ollama served ran locally and is €0, like `local/*` and `<synthetic>` events. Copilot CLI models without a rate of their own use the representative `copilot-auto` rate. FX defaults to 0.92 (USD → EUR), editable in settings.
 
 ## Visual identity
 
