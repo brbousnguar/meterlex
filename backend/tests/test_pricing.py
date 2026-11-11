@@ -115,3 +115,53 @@ def test_an_ollama_hosted_model_is_priced_by_its_host_whatever_ran_it(session):
     assert row is not None and row.model_id == "ollama/glm-5.2:cloud"
     # A model Ollama served locally has no cloud row, so it stays free.
     assert pricing.resolve_price(session, "ollama/qwen3.6:35b-mlx", source="openclaw") is None
+
+
+def _sol_payload():
+    """GPT-5.6 Sol as model-prices sends it: launched at $5 / $30, cut to $4 / $20 on 21 Aug."""
+    return [{
+        "model_id": "gpt-5.6-sol", "prompt": 4e-6, "completion": 20e-6, "cache_read": 0.4e-6,
+        "reasoning": 20e-6, "source": "openrouter",
+        "history": [
+            {"on": "2026-07-09", "kind": "launch", "prompt": 5e-6, "completion": 30e-6, "cache_read": 0.5e-6},
+            {"on": "2026-08-21", "kind": "change", "prompt": 4e-6, "completion": 20e-6, "cache_read": 0.4e-6},
+        ],
+    }]
+
+
+def test_a_turn_is_priced_at_the_rate_of_its_day(session, monkeypatch):
+    from datetime import datetime
+    monkeypatch.setattr(pricing.httpx, "AsyncClient", lambda *a, **kw: _FakeAsyncClient(_sol_payload()))
+    asyncio.run(pricing.mirror_pull_prices(session))
+    usage = {"input": 1_000, "output": 100, "cacheRead": 10_000, "reasoningTokens": 50}
+
+    def cost(at):
+        return pricing.compute_cost(session, "openai", "gpt-5.6-sol", usage, at=at)[0]
+
+    launch = round(1_000 * 5e-6 + 100 * 30e-6 + 10_000 * 0.5e-6 + 50 * 30e-6, 8)
+    today = round(1_000 * 4e-6 + 100 * 20e-6 + 10_000 * 0.4e-6 + 50 * 20e-6, 8)
+    assert cost(datetime(2026, 8, 1, 12)) == launch
+    assert cost(datetime(2026, 8, 20, 23, 59)) == launch
+    assert cost(datetime(2026, 8, 21, 0, 1)) == today       # the cut applies from its day
+    assert cost(datetime(2026, 11, 11)) == today
+    assert cost(datetime(2026, 6, 1)) == launch               # before launch: the launch price
+    assert cost(None) == today                                # no date: today's card
+
+
+def test_a_model_with_one_point_keeps_todays_rate(session, monkeypatch):
+    """A single launch point means no announced change, so the row rules, even if it moved since."""
+    from datetime import datetime
+    payload = [{"model_id": "gpt-5", "prompt": 1.25e-6, "completion": 10e-6,
+                "history": [{"on": "2025-08-07", "kind": "launch", "prompt": 1e-6, "completion": 8e-6}]}]
+    monkeypatch.setattr(pricing.httpx, "AsyncClient", lambda *a, **kw: _FakeAsyncClient(payload))
+    asyncio.run(pricing.mirror_pull_prices(session))
+    assert pricing.compute_cost(session, "openai", "gpt-5", {"input": 1_000}, at=datetime(2025, 9, 1))[0] == 0.00125
+
+
+def test_a_history_change_alone_reprices(session, monkeypatch):
+    payload = _sol_payload()
+    monkeypatch.setattr(pricing.httpx, "AsyncClient", lambda *a, **kw: _FakeAsyncClient(payload))
+    assert asyncio.run(pricing.mirror_pull_prices(session))["changed"] is True
+    assert asyncio.run(pricing.mirror_pull_prices(session))["changed"] is False
+    payload[0]["history"][0]["prompt"] = 6e-6
+    assert asyncio.run(pricing.mirror_pull_prices(session))["changed"] is True

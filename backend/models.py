@@ -1,6 +1,6 @@
 """SQLModel schema for the Meterlex tracker."""
 import os
-from datetime import datetime
+from datetime import date, datetime
 from typing import Optional
 from sqlmodel import SQLModel, Field
 from sqlalchemy import UniqueConstraint
@@ -71,6 +71,22 @@ class ModelPrice(SQLModel, table=True):
     reasoning: float = 0.0
     source: str = "manual"
     updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class PricePoint(SQLModel, table=True):
+    """A dated rate from model-prices' price history, mirrored with the card.
+
+    A turn is priced at the point in force on its day; the newest point means
+    "today's rate", so the ModelPrice row wins there."""
+    __tablename__ = "price_points"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    model_id: str = Field(index=True)
+    on: date
+    prompt: float = 0.0        # USD per single token
+    completion: float = 0.0
+    cache_read: float = 0.0
+    cache_write: float = 0.0
 
 
 class ManualBill(SQLModel, table=True):

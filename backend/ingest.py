@@ -136,7 +136,7 @@ def _price(session: Session, row: UsageTurn, fx: float) -> None:
         "cacheWrite": row.cache_write, "reasoningTokens": row.reasoning_tokens,
     }
     row.cost_usd, row.price_source = pricing.compute_cost(
-        session, PROVIDER_BY_SOURCE.get(row.source, ""), row.model_id, usage, source=row.source,
+        session, PROVIDER_BY_SOURCE.get(row.source, ""), row.model_id, usage, source=row.source, at=row.ts,
     )
     row.cost_eur = round(row.cost_usd * fx, 8)
     row.fx_rate = fx
@@ -333,7 +333,7 @@ async def price_loop():
 
 
 def recompute_costs() -> int:
-    """Reprice every stored turn from the current rate card."""
+    """Reprice every stored turn from the current rate card, each at the rate of its day."""
     with Session(engine) as session:
         fx = pricing.get_fx_rate(session)
         n, last_id = 0, 0
