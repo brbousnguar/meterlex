@@ -166,6 +166,21 @@ class CreditDay(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
+class CreditKey(SQLModel, table=True):
+    """One API key's credits so far in the month that resets at `resets_at`, from the
+    latest reading that carried them (#99), with the cap set on the collector, since
+    the provider doesn't say it. A newer reading replaces the provider's rows."""
+    __tablename__ = "credit_keys"
+
+    provider: str = Field(primary_key=True)
+    name: str = Field(primary_key=True)  # the key's name on the provider, never the key
+    used: int = 0
+    cap: Optional[int] = None
+    resets_at: datetime                 # naive UTC: the month these credits belong to
+    ts: datetime                        # the reading's time, naive UTC
+    machine: str = Field(default=HUB_MACHINE)
+
+
 class BalanceReading(SQLModel, table=True):
     """A prepaid account as its own API reports it, in micro-dollars (OpenRouter:
     credits bought and used, all time). OpenAI says neither, so its reading only

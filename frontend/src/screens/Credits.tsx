@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { api, type Credits as CreditsData, type Prepaid as PrepaidData } from "../api";
+import { api, type CreditKey, type Credits as CreditsData, type Prepaid as PrepaidData } from "../api";
 import Bars, { type BarPoint } from "../components/Bars";
 import MonthLine from "../components/MonthLine";
 import { fmtInt, fmtUsd, fmtUsdShort, pct } from "../lib";
@@ -70,6 +70,9 @@ function Month({ c }: { c: CreditsData }) {
   const tone = p?.status === "ahead" ? "over" : p?.status === "behind" ? "under" : undefined;
   const early = p?.runs_out_at ? (Date.parse(w.reset) - Date.parse(p.runs_out_at)) / 86_400_000 : null;
   const monthUsed = (c.days ?? []).reduce((a, d) => a + d.used, 0);
+  const keys = c.keys ?? [];
+  // the key that reaches its cap first, if one does before the reset (#99)
+  const firstOut = keys.filter((k) => k.runs_out_at).sort((a, b) => Date.parse(a.runs_out_at!) - Date.parse(b.runs_out_at!))[0];
 
   // days are UTC, as ElevenLabs counts them; the label is the day of the month
   const points: BarPoint[] = (c.days ?? []).map((d) => {
@@ -104,6 +107,11 @@ function Month({ c }: { c: CreditsData }) {
           {p && (
             <span className={`pace-chip${tone ? ` ${tone}` : ""}`}>
               {p.status === "on" ? "on pace" : `${Math.abs(p.delta_pts).toFixed(0)} pts ${p.status === "ahead" ? "ahead of" : "behind"} pace`}
+            </span>
+          )}
+          {firstOut && (
+            <span className="pace-chip over">
+              {firstOut.name} {firstOut.cap != null && firstOut.used >= firstOut.cap ? "is at its cap" : `reaches its cap ${dayDate(firstOut.runs_out_at!)}`}
             </span>
           )}
           {p?.runs_out_at && early !== null ? (
@@ -151,6 +159,24 @@ function Month({ c }: { c: CreditsData }) {
         </div>
       </section>
 
+      {keys.length > 0 && (
+        <section className="section">
+          <div className="section-head">
+            <h2 className="section-title">By key</h2>
+            <div className="section-note">each key against its own cap</div>
+          </div>
+          <div className="rank">
+            {keys.map((k) => <KeyRow key={k.name} k={k} elapsed={w.elapsed_pct} limit={limit} dayDate={dayDate} />)}
+          </div>
+          {!keys.some((k) => k.cap != null) && (
+            <p className="rank-sub key-hint">
+              No caps set yet. On the collector&apos;s machine, run <span className="mono">credits --elevenlabs-cap NAME=CREDITS</span> with
+              each cap from the ElevenLabs keys page.
+            </p>
+          )}
+        </section>
+      )}
+
       <section className="section">
         <div className="section-head">
           <h2 className="section-title">The month against its pace</h2>
@@ -172,9 +198,43 @@ function Month({ c }: { c: CreditsData }) {
         for the subscription's count and the daily usage at most every 15 minutes, and the key never
         leaves that machine. A month runs from one reset to the next; the pace is an even month, and
         the projection carries the month's own rate, from the reset to the last reading, on to the
-        next reset.
+        next reset. Use by key comes from the same usage stats, by key name. ElevenLabs doesn&apos;t
+        report a key&apos;s cap, so the caps are the ones set on the collector.
       </p>
     </>
+  );
+}
+
+/** One key's month: % of its cap, a meter with the month's tick, and where its rate lands (#99). Without a
+ *  cap, the figure is its credits and the meter its part of the account's limit. */
+function KeyRow({ k, elapsed, limit, dayDate }: { k: CreditKey; elapsed: number; limit: number; dayDate: (iso: string) => string }) {
+  const capped = k.cap != null;
+  const fill = capped ? Math.min(100, k.used_pct ?? 0) : Math.min(100, pct(k.used, Math.max(limit, 1)));
+  const atCap = capped && k.used >= k.cap!;
+  // a key that used anything never reads 0%, and one under 1% of the month says nothing of where it lands
+  const small = (n: number) => k.used > 0 && n < 1;
+  const pace = atCap ? " · at its cap"
+    : k.runs_out_at ? ` · at this rate, reaches its cap ${dayDate(k.runs_out_at)}`
+    : small(k.share_pct) ? ""
+    : capped && k.projected_pct != null ? ` · at this rate, ${k.projected_pct.toFixed(0)}% of its cap by the reset`
+    : !capped && k.projected_used != null ? ` · ≈ ${fmtInt(k.projected_used)} by the reset`
+    : "";
+  return (
+    <div className="rank-row key-row">
+      <div className="rank-name"><span className="mono">{k.name}</span></div>
+      <div className={`rank-value${k.runs_out_at ? " over" : ""}`}>{!capped ? fmtInt(k.used) : small(k.used_pct ?? 0) ? "<1%" : `${(k.used_pct ?? 0).toFixed(0)}%`}</div>
+      <div className="key-meter" role="img"
+           aria-label={capped ? `${(k.used_pct ?? 0).toFixed(0)}% of its cap used, ${elapsed.toFixed(0)}% of the month gone`
+             : `${fill.toFixed(0)}% of the account's credits`}>
+        <i className={`key-fill${capped && (k.used_pct ?? 0) >= ALARM_PCT ? " alarm" : ""}`} style={{ width: `${fill}%` }} />
+        {capped && <i className="key-now" style={{ left: `${elapsed}%` }} />}
+      </div>
+      <div className="rank-sub key-sub">
+        {capped ? `${fmtInt(k.used)} of ${fmtInt(k.cap!)} credits` : `${fmtInt(k.used)} credit${k.used === 1 ? "" : "s"} · no cap set`}
+        {!k.used ? " · not used this month"
+          : ` · ${small(k.share_pct) ? "under 1%" : `${k.share_pct.toFixed(0)}%`} of the month's${pace}`}
+      </div>
+    </div>
   );
 }
 

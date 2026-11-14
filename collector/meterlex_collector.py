@@ -14,7 +14,7 @@ into what is sent. `run --dry-run` prints exactly what would go.
     python meterlex_collector.py install      # launchd on macOS, a Scheduled Task on Windows, a systemd timer on Linux
     python meterlex_collector.py statusline   # Claude Code's status line: records the Claude Max quota
     python meterlex_collector.py probe        # read the Claude Max quota now, with one tiny headless call
-    python meterlex_collector.py credits [--elevenlabs-env FILE] [--openrouter-env FILE] [--openai-env FILE]
+    python meterlex_collector.py credits [--elevenlabs-env FILE] [--elevenlabs-cap NAME=CREDITS] [--openrouter-env FILE] [--openai-env FILE]
                                          # read the ElevenLabs credits and the prepaid balances now
 
 One file, standard library only, Python 3.9+: macOS's own /usr/bin/python3 runs
@@ -41,7 +41,7 @@ from pathlib import Path
 from typing import Iterator, Optional
 from urllib.parse import urlparse
 
-VERSION = "0.9.2"
+VERSION = "0.10.0"
 BATCH = 1000               # turns per POST
 SPOOL_MAX = 500_000        # unsent turns kept on disk before the oldest are dropped
 HOME = Path.home()
@@ -1449,6 +1449,12 @@ def quota_flush(cfg: dict, state: dict) -> tuple[int, Optional[str]]:
 # (config.json "elevenlabs_env", set with `credits --elevenlabs-env FILE`), `run`
 # reads the month's count and the daily usage stats at most every
 # CREDITS_EVERY_S and sends them as `credits`. The key only goes to ElevenLabs.
+#
+# Each API key can have its own monthly cap, so a reading also carries the
+# month's use by key (#99): the same usage stats, cumulative from the month's
+# start, broken down by key name. ElevenLabs doesn't say a key's cap, so the
+# caps are the ones set here (config.json "elevenlabs_caps", with
+# `credits --elevenlabs-cap NAME=CREDITS`). Only key names go to the hub.
 
 CREDITS_EVERY_S = 900
 CREDITS_DAYS = 40           # daily figures sent with each reading: the month and a little before it
@@ -1487,7 +1493,43 @@ def _elevenlabs(key: str, path: str) -> dict:
         return json.loads(r.read().decode("utf-8"))
 
 
-def credit_reading(sub: dict, stats: dict, now: float) -> Optional[dict]:
+def month_before(ts: int) -> int:
+    """The same day and time a month before a UTC epoch, on the month's last day when it is shorter:
+    the start of the month that resets at ts."""
+    dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+    y, m = (dt.year, dt.month - 1) if dt.month > 1 else (dt.year - 1, 12)
+    for day in (dt.day, 30, 29, 28):
+        try:
+            return int(dt.replace(year=y, month=m, day=day).timestamp())
+        except ValueError:
+            continue
+    raise ValueError(ts)
+
+
+def key_usage(stats: dict, caps: dict) -> list:
+    """The month's credits by key name, from cumulative stats broken down by key, with the caps set here.
+    A key with a cap and no use yet is listed at 0."""
+    used = {}
+    usage = stats.get("usage") if isinstance(stats.get("usage"), dict) else {}
+    for name, series in usage.items():
+        if not isinstance(series, list) or not series:
+            continue
+        try:
+            used[str(name)[:64]] = int(float(series[-1]))
+        except (TypeError, ValueError, OverflowError):
+            continue
+    keys = []
+    for name in sorted(set(used) | set(caps), key=lambda n: (-used.get(n, 0), n)):
+        if not used.get(name) and name not in caps:
+            continue
+        k = {"name": name, "used": used.get(name, 0)}
+        if caps.get(name):
+            k["cap"] = int(caps[name])
+        keys.append(k)
+    return keys
+
+
+def credit_reading(sub: dict, stats: dict, now: float, keys: Optional[list] = None) -> Optional[dict]:
     """The subscription's count and the daily stats, as one reading."""
     try:
         used, limit = int(sub["character_count"]), int(sub["character_limit"])
@@ -1507,6 +1549,8 @@ def credit_reading(sub: dict, stats: dict, now: float) -> Optional[dict]:
                "ts": datetime.fromtimestamp(now, tz=timezone.utc).isoformat(), "days": days}
     if sub.get("tier"):
         reading["plan"] = str(sub["tier"])
+    if keys is not None:
+        reading["keys"] = keys
     return reading
 
 
@@ -1525,7 +1569,15 @@ def read_credits(cfg: dict, now: float) -> tuple[Optional[dict], Optional[str]]:
         return None, f"ElevenLabs answered {exc.code}"
     except (urllib.error.URLError, OSError, ValueError) as exc:
         return None, f"ElevenLabs unreachable ({exc.__class__.__name__})"
-    reading = credit_reading(sub, stats, now)
+    keys = None
+    try:   # the month by key is extra: the reading goes without it when it can't be read
+        start = month_before(int(sub["next_character_count_reset_unix"])) * 1000
+        by_key = _elevenlabs(key, f"/v1/usage/character-stats?start_unix={start}&end_unix={end}"
+                                  "&aggregation_interval=cumulative&breakdown_type=all_api_keys")
+        keys = key_usage(by_key, cfg.get("elevenlabs_caps") or {})
+    except (KeyError, TypeError, ValueError, OverflowError, OSError, urllib.error.URLError):
+        pass
+    reading = credit_reading(sub, stats, now, keys)
     return (reading, None) if reading else (None, "ElevenLabs sent no character count")
 
 
@@ -1568,6 +1620,19 @@ def cmd_credits(args) -> int:
         else:
             cfg.pop(cfg_key, None)
         changed = True
+    for spec in args.elevenlabs_cap or []:
+        name, sep, value = spec.partition("=")
+        name = name.strip()
+        if not sep or not name or (value.strip() and not value.strip().isdigit()):
+            print(f"--elevenlabs-cap wants NAME=CREDITS (NAME= clears it), not {spec!r}", file=sys.stderr)
+            return 2
+        caps = dict(cfg.get("elevenlabs_caps") or {})
+        if value.strip():
+            caps[name] = int(value)
+        else:
+            caps.pop(name, None)
+        cfg["elevenlabs_caps"] = caps
+        changed = True
     if changed:
         _write_json(config_dir() / "config.json", cfg)
     now, failed, read = time.time(), False, 0
@@ -1577,6 +1642,8 @@ def cmd_credits(args) -> int:
         failed = True
     elif reading is not None:
         print(_credits_text(reading) + f" · {len(reading['days'])} day(s) of stats")
+        for k in reading.get("keys", []):
+            print(f"  {k['name']}: {k['used']:,}" + (f" of its {k['cap']:,} cap" if k.get("cap") else "") + " this month")
         read += 1
     for provider, key in balance_keys(cfg).items():
         reading, error = read_balance(provider, key, now)
@@ -1868,7 +1935,9 @@ def cmd_status(cfg: dict) -> int:
     source = ("ELEVENLABS_API_KEY" if os.environ.get("ELEVENLABS_API_KEY", "").strip()
               else cfg.get("elevenlabs_env"))
     last = state.get("credits_last")
+    caps = cfg.get("elevenlabs_caps") or {}
     print(f"  credits  " + (f"elevenlabs, key from {source}" + (", key not found" if not elevenlabs_key(cfg) else "")
+                            + (f", caps {', '.join(f'{n} {c:,}' for n, c in sorted(caps.items()))}" if caps else "")
                             + (f", last {_credits_text(last)} read {last['ts']}" if last else ", not read yet")
                             + (f", error {state['credits_error']}" if state.get("credits_error") else "")
                             if source else "off (`credits --elevenlabs-env FILE`)"))
@@ -1992,6 +2061,9 @@ def main(argv=None) -> int:
                                        "`run` sends them every 15 minutes")
     c.add_argument("--elevenlabs-env", metavar="FILE",
                    help="an env file holding ELEVENLABS_API_KEY=… (saved in config.json; an empty value clears it)")
+    c.add_argument("--elevenlabs-cap", metavar="NAME=CREDITS", action="append",
+                   help="an API key's monthly credit cap, as set on ElevenLabs, which its API doesn't report "
+                        "(repeatable; saved in config.json; NAME= clears it)")
     c.add_argument("--openrouter-env", metavar="FILE",
                    help="an env file holding OPENROUTER_API_KEY=… (saved in config.json; an empty value clears it)")
     c.add_argument("--openai-env", metavar="FILE",

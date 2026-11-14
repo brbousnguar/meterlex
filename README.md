@@ -306,10 +306,28 @@ and time a calendar month apart). It keeps clear of the Claude quota:
   at this rate to the reset or to where it hits 100%. Point at any day for its
   figure, the credits that day and so far, and how far it ran ahead of pace;
   `←` `→` move a day, Shift a week;
-- credits by day, UTC days as ElevenLabs counts them.
+- credits by day, UTC days as ElevenLabs counts them;
+- **By key**: each API key's credits this month against its own cap, its part
+  of the month's credits, and the day it reaches its cap at the month's rate,
+  with a red chip at the top for the first key that gets there.
 
 A reading over an hour old is marked stale. Once the reset has passed, the page
 shows the new month empty until the next reading.
+
+#### Caps by key
+
+ElevenLabs reports each key's credits by name (`breakdown_type=all_api_keys`,
+read with the same key), but not the cap set on its keys page: a personal key
+can't read other keys. So the caps are typed once on the collector's machine:
+
+```bash
+python3 collector/meterlex_collector.py credits --elevenlabs-cap site=60000 --elevenlabs-cap app=15000
+```
+
+Each `NAME=CREDITS` saves a cap in `config.json`, `NAME=` clears it, and the
+reading printed after lists every key. The name is the key's name on the
+ElevenLabs keys page. A key without a cap still shows its credits and its part
+of the month. When a cap changes on ElevenLabs, run it again.
 
 ### OpenRouter and OpenAI balances
 
@@ -367,7 +385,7 @@ backend/
   manage.py         Admin commands: machine keys, legacy dedupe, quota plan
   pricing.py        Price resolution: mirrored rate card → Meterlex's fallbacks → free,
                     at the rate in force on the turn's day
-  models.py         SQLModel schema (UsageTurn, Machine, ModelPrice, Setting, ManualBill, CreditReading, CreditDay, BalanceReading)
+  models.py         SQLModel schema (UsageTurn, Machine, ModelPrice, Setting, ManualBill, CreditReading, CreditDay, CreditKey, BalanceReading)
   database.py       Engine, session helpers, column migrations
 frontend/
   src/
@@ -456,7 +474,7 @@ paths.
 | `GET` | `/api/config` | What the UI needs about this deployment: the rate card's address and the period time zone |
 | `GET` | `/api/overview` | Everything one screen needs for a period (`?period=weekly\|monthly\|yearly`, `?ref=`, `?machine=`, `?source=`): totals with the token split, the same-length period before, by machine, harness, model, project (with its top branches) and origin, and a bucketed series with the empty buckets kept |
 | `GET` | `/api/quota` | The Claude Max week: window, used % against elapsed %, pace and projection, tokens, the estimated budget and what is left, per-day bars, tokens per hour of the window, past weeks, weekday × hour, top models, folders and machines, and `five_hour`: the open 5-hour window (used, elapsed, minutes left, pace and projection, when it was capped, its readings, tokens per ten minutes, tokens, budget and what is left) and the last six windows. `reading` carries `tokens_since` and `stale` (over 30 minutes old with Claude Code tokens after it). `?back=N` (0–8) reads the window N weeks earlier to its reset, without pace, projection, 5-hour window or booked plan |
-| `GET` | `/api/credits` | `?provider=elevenlabs`: the metered month: the latest reading and whether it is stale, the plan, the window from the reset before to the reset ahead, used / limit / left and %, pace and projection with the day the credits run out, what a day can spend to last to the reset, the last seven days' average, and credits per UTC day. `reading: null` before the first one |
+| `GET` | `/api/credits` | `?provider=elevenlabs`: the metered month: the latest reading and whether it is stale, the plan, the window from the reset before to the reset ahead, used / limit / left and %, pace and projection with the day the credits run out, what a day can spend to last to the reset, the last seven days' average, credits per UTC day, and `keys`: each API key's credits against its cap, its share of the month and when it reaches its cap. `reading: null` before the first one |
 | `GET` | `/api/credits?provider=openrouter\|openai` | A prepaid account (`kind: "prepaid"`), in dollars: the latest reading and whether it is stale, bought / used (OpenRouter) or the balance typed and what was spent since (OpenAI), what is left, the rate a day over the last seven days, how many days it lasts and when it runs out, what went today / in 7 days / this month, and 30 UTC days of spend |
 | `PUT` | `/api/credits/openai/balance` | `{"usd": 12.34, "topped_up": "2026-10-07"}`: the balance on the OpenAI billing page now (`null` clears it) and, optionally, the day of the last top-up; returns the OpenAI view |
 | `GET` | `/api/sessions/{session_id}/usage` | One session's turns, tokens (input, output, cache), cost in EUR and USD, the same per model, first and last turn, and active seconds (gaps between turns, each capped at 5 minutes). `?from=` / `?to=` (ISO 8601, UTC without an offset) limit it to `[from, to)`. Subagent turns are stored under the parent session's id, so they are included. An unknown id answers `found: false` with zeros. Worklex uses it for the cost of each issue |

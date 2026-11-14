@@ -340,6 +340,24 @@ export type Credits = {
   recent_per_day?: number;
   /** credits by UTC day, from the reset's day to the reset ahead */
   days?: { day: string; used: number; current: boolean; future: boolean }[];
+  /** the month by API key, most used first (#99); empty before the collector sends them */
+  keys?: CreditKey[];
+};
+
+/** One API key's month against its own cap, set on the collector since ElevenLabs doesn't say it (#99). */
+export type CreditKey = {
+  name: string;
+  used: number;
+  cap: number | null;
+  /** of its cap */
+  used_pct: number | null;
+  /** of the month's credits */
+  share_pct: number;
+  status: "ahead" | "on" | "behind" | null;
+  projected_used: number | null;
+  projected_pct: number | null;
+  /** when it reaches its cap at this month's rate, if before the reset */
+  runs_out_at: string | null;
 };
 
 /** A prepaid account (#77), in dollars. OpenRouter says what was bought and used; OpenAI says neither, so
