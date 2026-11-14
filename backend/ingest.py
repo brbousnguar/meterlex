@@ -15,7 +15,7 @@ from typing import Optional
 from sqlmodel import Session, select
 
 from database import engine, create_db
-from models import BalanceReading, CreditDay, CreditReading, Machine, QuotaReading, UsageTurn
+from models import BalanceReading, CreditDay, CreditKey, CreditReading, Machine, QuotaReading, UsageTurn
 import prepaid
 import pricing
 
@@ -395,6 +395,8 @@ CREDIT_PROVIDERS = {"elevenlabs"}
 _DAY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 MAX_CREDITS_PER_BATCH = 50
 MAX_CREDIT_DAYS = 400
+MAX_CREDIT_KEYS = 50
+_KEY_NAME = re.compile(r"^[^\x00-\x1f\x7f]{1,64}$")
 MAX_USAGE_HOURS = 48     # the usage hours of a reading's day (#89)
 
 
@@ -428,6 +430,14 @@ def ingest_credits(session: Session, machine: Machine, readings: list) -> dict:
             days = [(str(d["day"]), _count(d["used"])) for d in days]
             if any(not _DAY.match(day) for day, _ in days):
                 raise ValueError("day")
+            keys = raw.get("keys")              # the month by API key (#99); collectors before 0.10 send none
+            if keys is not None:
+                if not isinstance(keys, list) or len(keys) > MAX_CREDIT_KEYS:
+                    raise ValueError("keys")
+                keys = [(str(k["name"]), _count(k["used"]), None if k.get("cap") is None else _count(k["cap"]))
+                        for k in keys]
+                if any(not _KEY_NAME.match(name) for name, _, _ in keys) or len({n for n, _, _ in keys}) < len(keys):
+                    raise ValueError("key name")
         except (KeyError, TypeError, ValueError, OverflowError, OSError):
             counts["rejected"] += 1
             continue
@@ -439,6 +449,15 @@ def ingest_credits(session: Session, machine: Machine, readings: list) -> dict:
                 row.used, row.updated_at = n, now
                 session.add(row)
             counts["days"] += 1
+        if keys is not None:
+            stored = session.exec(select(CreditKey).where(CreditKey.provider == provider)).all()
+            if all(k.ts <= ts for k in stored):     # an older reading sent late leaves the newer figures
+                for k in stored:
+                    session.delete(k)
+                session.flush()
+                for name, n, cap in keys:
+                    session.add(CreditKey(provider=provider, name=name, used=n, cap=cap, resets_at=resets, ts=ts,
+                                          machine=machine.name))
         seen = session.exec(select(CreditReading).where(
             CreditReading.provider == provider, CreditReading.ts == ts, CreditReading.machine == machine.name,
         )).first()

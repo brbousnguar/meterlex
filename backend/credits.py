@@ -5,6 +5,11 @@ The collector reads that and the daily usage stats; the hub only lays them
 against the month. The month runs from the reset before to the reset ahead
 (the same day and time a calendar month apart), the pace is an even month,
 and the projection carries the month's own rate to the reset.
+
+Each API key can have its own monthly cap (#99), and a capped key stops while
+the account still has credits. So the month is also given by key, each laid
+against its own cap the same way: the share used, the pace, and when it
+reaches the cap at this month's rate.
 """
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
@@ -12,7 +17,7 @@ from zoneinfo import ZoneInfo
 
 from sqlmodel import Session, select
 
-from models import CreditDay, CreditReading
+from models import CreditDay, CreditKey, CreditReading
 
 PROVIDERS = {"elevenlabs": "ElevenLabs"}
 DAY = timedelta(days=1)
@@ -65,9 +70,39 @@ def _days(session: Session, provider: str, first: date, last: date) -> dict:
     return {r.day: r.used for r in rows}
 
 
+def _keys(session: Session, provider: str, resets_at: datetime, start: datetime, reset: datetime,
+          elapsed_pct: float, month_used: int) -> list:
+    """The month by key: the rows of this month's latest reading, most used first, each against its cap."""
+    rows = session.exec(select(CreditKey).where(
+        CreditKey.provider == provider, CreditKey.resets_at == resets_at)).all()
+    out = []
+    for k in sorted(rows, key=lambda k: (-k.used, k.name)):
+        cap = k.cap or None
+        used_pct = round(100 * k.used / cap, 1) if cap else None
+        key = {"name": k.name, "used": k.used, "cap": cap, "used_pct": used_pct,
+               "share_pct": round(100 * k.used / month_used, 1) if month_used else 0.0,
+               "status": None, "projected_used": None, "projected_pct": None, "runs_out_at": None}
+        if used_pct is not None:
+            delta = used_pct - elapsed_pct
+            key["status"] = "ahead" if delta > PACE_BAND else "behind" if delta < -PACE_BAND else "on"
+        since = (k.ts - start).total_seconds()
+        if since >= MIN_FOR_PROJECTION.total_seconds():
+            rate = k.used / since
+            projected = k.used + rate * (reset - k.ts).total_seconds()
+            key["projected_used"] = round(projected)
+            if cap:
+                key["projected_pct"] = round(100 * projected / cap, 1)
+                if k.used >= cap:
+                    key["runs_out_at"] = _iso(k.ts)
+                elif rate > 0 and projected > cap:
+                    key["runs_out_at"] = _iso(k.ts + timedelta(seconds=(cap - k.used) / rate))
+        out.append(key)
+    return out
+
+
 def view(session: Session, now: datetime, tz: ZoneInfo, provider: str = "elevenlabs") -> dict:
     out = {"now": _iso(now), "tz": str(tz), "provider": provider, "label": PROVIDERS[provider],
-           "reading": None}
+           "reading": None, "keys": []}
     r = _latest(session, provider)
     if r is None:
         return out
@@ -111,6 +146,7 @@ def view(session: Session, now: datetime, tz: ZoneInfo, provider: str = "elevenl
             elif rate > 0 and projected > limit:
                 pace["runs_out_at"] = _iso(r.ts + timedelta(seconds=(limit - used) / rate))
     out["pace"] = pace
+    out["keys"] = [] if passed else _keys(session, provider, r.resets_at, start, reset, elapsed_pct, used or 0)
     out["per_day_to_reset"] = round(left / days_left) if left is not None and days_left >= 1 else None
 
     # credits by UTC day, the way the provider counts them, from the reset's day to the reset ahead

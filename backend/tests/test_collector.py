@@ -718,6 +718,62 @@ def test_an_elevenlabs_error_is_kept_and_tried_on_the_next_run(tmp_path, monkeyp
     assert state["credits_error"] == "ElevenLabs answered 401" and "credits_at" not in state
 
 
+
+# the month by key (#99): cumulative from the month's start, one series per key name
+BY_KEY = {"time": [1_794_096_000_000, 1_794_182_400_000],
+          "usage": {"site": [8870.0, 24676.0], "app": [0.0, 12.0], "quiet": [0.0, 0.0]}}
+
+
+def test_the_month_starts_a_calendar_month_before_its_reset():
+    assert mc.month_before(1_796_724_400) == 1_794_132_400          # 8 Dec 10:06 UTC → 8 Nov 10:06 UTC
+    assert mc.month_before(1_774_915_200) == 1_772_236_800          # 31 Mar 2026 → 28 Feb
+
+
+def test_the_month_by_key_takes_each_series_last_figure_and_the_caps_set_here():
+    keys = mc.key_usage(BY_KEY, {"site": 60_000, "unused": 5_000})
+    assert keys == [{"name": "site", "used": 24_676, "cap": 60_000}, {"name": "app", "used": 12},
+                    {"name": "unused", "used": 0, "cap": 5_000}]          # "quiet" has neither use nor a cap
+    assert mc.key_usage({}, {}) == []
+
+
+def test_a_reading_carries_the_month_by_key_and_goes_without_it_when_that_call_fails(monkeypatch):
+    monkeypatch.setenv("ELEVENLABS_API_KEY", "sk_test")
+    asked = []
+
+    def fake_eleven(key, path):
+        asked.append(path)
+        if path.startswith("/v1/user/"):
+            return SUBSCRIPTION
+        return BY_KEY if "breakdown_type=all_api_keys" in path else STATS
+
+    monkeypatch.setattr(mc, "_elevenlabs", fake_eleven)
+    reading, error = mc.read_credits({"elevenlabs_caps": {"site": 60_000}}, 1_794_600_000.0)
+    assert error is None and reading["keys"][0] == {"name": "site", "used": 24_676, "cap": 60_000}
+    by_key = next(p for p in asked if "all_api_keys" in p)
+    assert "start_unix=1791454000000" in by_key and "aggregation_interval=cumulative" in by_key
+
+    def no_breakdown(key, path):
+        if "all_api_keys" in path:
+            raise urllib.error.HTTPError(path, 401, "missing_permissions", {}, None)
+        return fake_eleven(key, path)
+
+    monkeypatch.setattr(mc, "_elevenlabs", no_breakdown)
+    reading, error = mc.read_credits({}, 1_794_600_000.0)
+    assert error is None and reading["used"] == 121_886 and "keys" not in reading
+
+
+def test_credits_saves_and_clears_a_key_cap(tmp_path, monkeypatch):
+    monkeypatch.setenv("METERLEX_HOME", str(tmp_path))
+    monkeypatch.delenv("ELEVENLABS_API_KEY", raising=False)
+    for var in ("OPENROUTER_API_KEY", "OPENAI_ADMIN_KEY"):
+        monkeypatch.delenv(var, raising=False)
+    cfg = lambda: json.loads((tmp_path / "config.json").read_text())
+    mc.main(["credits", "--elevenlabs-cap", "site=60000", "--elevenlabs-cap", "app=5000"])
+    assert cfg()["elevenlabs_caps"] == {"site": 60_000, "app": 5_000}
+    mc.main(["credits", "--elevenlabs-cap", "app="])
+    assert cfg()["elevenlabs_caps"] == {"site": 60_000}
+    assert mc.main(["credits", "--elevenlabs-cap", "site=lots"]) == 2 and cfg()["elevenlabs_caps"] == {"site": 60_000}
+
 OPENROUTER_CREDITS = {"data": {"total_credits": 90, "total_usage": 86.4321}}
 OPENAI_COSTS = {"object": "page", "has_more": False, "next_page": None, "data": [
     {"start_time": 1761091200, "end_time": 1761177600, "results": [          # 2025-10-22

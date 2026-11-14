@@ -680,6 +680,15 @@ a.linkout::after { content: "↗"; margin-left: auto; color: var(--accent-ink); 
   position: absolute; top: calc(100% + 2px); left: 50%; transform: translateX(-50%);
   font-family: var(--mono); font-weight: 500; font-size: .62rem; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-2);
 }
+/* A key's month against its own cap (#99): the fill is what it used of its cap (of the account's limit
+   when it has none), the tick where the month is. */
+.key-meter { grid-column: 1 / -1; position: relative; height: 8px; background: var(--surface-2); }
+.key-meter i { position: absolute; top: 0; bottom: 0; display: block; }
+.key-fill { left: 0; background: var(--meter, var(--h-claude)); }
+.key-fill.alarm { background: var(--over); }
+.key-now { width: 2px; margin-left: -1px; top: -3px !important; bottom: -3px !important; background: var(--ink); }
+.key-sub { grid-column: 1 / -1; }
+.key-hint { margin-top: 10px; }
 .pace-chip {
   display: inline-flex; align-items: center; padding: 3px 9px; font-size: .84rem; font-weight: 650;
   border: 1px solid var(--rule); color: var(--ink);

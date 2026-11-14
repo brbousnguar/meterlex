@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 
 from sqlmodel import Session, select
 
-from models import CreditDay, CreditReading, Machine
+from models import CreditDay, CreditKey, CreditReading, Machine
 import credits
 import ingest
 import machines
@@ -23,9 +23,12 @@ def _machine(session, name="mini"):
     return session.get(Machine, name)
 
 
-def _reading(ts: datetime, used: int, limit: int = 100_000, reset: datetime = RESET, days=None) -> dict:
-    return {"provider": "elevenlabs", "used": used, "limit": limit, "resets_at": _epoch(reset),
-            "ts": ts.isoformat(), "plan": "creator", "days": days or []}
+def _reading(ts: datetime, used: int, limit: int = 100_000, reset: datetime = RESET, days=None, keys=None) -> dict:
+    r = {"provider": "elevenlabs", "used": used, "limit": limit, "resets_at": _epoch(reset),
+         "ts": ts.isoformat(), "plan": "creator", "days": days or []}
+    if keys is not None:
+        r["keys"] = keys
+    return r
 
 
 def test_a_reading_is_stored_once_and_its_days_take_the_latest_figure(session):
@@ -100,3 +103,50 @@ def test_the_api_takes_credits_beside_turns(client, engine):
 
 def test_no_reading_yet(client):
     assert client.get("/api/credits").json()["reading"] is None
+
+
+# the month by API key (#99)
+SITE = {"name": "site", "used": 50_000, "cap": 60_000}
+APP = {"name": "app", "used": 10_000}
+IDLE = {"name": "idle", "used": 0, "cap": 5_000}
+
+
+def test_a_reading_by_key_replaces_the_keys_before_it_and_a_late_older_one_does_not(session):
+    m = _machine(session)
+    read = START + timedelta(days=10)
+    ingest.ingest_credits(session, m, [_reading(read, 60_000, keys=[SITE, APP])])
+    ingest.ingest_credits(session, m, [_reading(read + timedelta(minutes=15), 60_100, keys=[{**SITE, "used": 50_100}])])
+    rows = session.exec(select(CreditKey)).all()
+    assert [(k.name, k.used, k.cap) for k in rows] == [("site", 50_100, 60_000)]   # "app" went with the newer reading
+    ingest.ingest_credits(session, m, [_reading(read + timedelta(minutes=5), 60_050, keys=[APP])])
+    assert [k.name for k in session.exec(select(CreditKey)).all()] == ["site"]
+    ingest.ingest_credits(session, m, [_reading(read + timedelta(minutes=30), 60_200)])  # an old collector: keys stay
+    assert len(session.exec(select(CreditKey)).all()) == 1
+    bad = [_reading(read + timedelta(hours=1), 1, keys=k) for k in
+           ({"site": 1}, [{"name": "", "used": 1}], [{"name": "a\nb", "used": 1}], [{"name": "x", "used": -1}],
+            [{"name": "x", "used": 1}, {"name": "x", "used": 2}], [{"name": "x", "used": 1, "cap": "lots"}])]
+    assert ingest.ingest_credits(session, m, bad)["rejected"] == 6
+
+
+def test_each_key_is_laid_against_its_own_cap(session):
+    m = _machine(session)
+    read = START + timedelta(days=10)
+    ingest.ingest_credits(session, m, [_reading(read, 60_000, keys=[SITE, APP, IDLE])])
+    v = credits.view(session, read + timedelta(minutes=5), PARIS)
+    assert [k["name"] for k in v["keys"]] == ["site", "app", "idle"]
+    site, app, idle = v["keys"]
+    assert site["used_pct"] == 83.3 and site["share_pct"] == 83.3 and site["status"] == "ahead"
+    # 5,000 a day: 155,000 by the reset, and the cap's last 10,000 gone two days after the reading
+    assert site["projected_used"] == 155_000 and site["projected_pct"] == 258.3
+    assert site["runs_out_at"] == "2026-10-20T10:06:00Z"
+    assert app["cap"] is None and app["used_pct"] is None and app["status"] is None
+    assert app["projected_used"] == 31_000 and app["runs_out_at"] is None
+    assert idle["used_pct"] == 0.0 and idle["status"] == "behind" and idle["runs_out_at"] is None
+
+
+def test_a_key_at_its_cap_is_used_up_and_keys_end_with_their_month(session):
+    m = _machine(session)
+    read = START + timedelta(days=10)
+    ingest.ingest_credits(session, m, [_reading(read, 60_000, keys=[{**SITE, "used": 60_000}])])
+    assert credits.view(session, read, PARIS)["keys"][0]["runs_out_at"] == "2026-10-18T10:06:00Z"
+    assert credits.view(session, RESET + timedelta(minutes=10), PARIS)["keys"] == []
